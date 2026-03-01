@@ -62,7 +62,7 @@ build_frontend() {
         log "Installing npm dependencies..."
         npm install --silent
     fi
-    npx vite build
+    npx vite build --mode test
     log "Frontend build complete -> $FRONTEND_DIR/dist/"
 }
 
