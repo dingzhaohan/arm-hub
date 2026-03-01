@@ -92,25 +92,84 @@ def search_bohrium_papers(
 
     raw_items = body.get("data") or []
 
-    # Map RAG response fields to our format
+    # Map RAG response fields and auto-upsert into local DB
     results = []
     for item in raw_items:
-        paper_id = item.get("paperId") or item.get("id") or item.get("doi") or ""
+        bohrium_id = str(item.get("paperId") or item.get("id") or item.get("doi") or "")
+        if not bohrium_id:
+            continue
+
+        title = item.get("enName") or item.get("zhName") or ""
+        if not title:
+            continue
+
+        raw_authors = item.get("authors") or ""
+        authors = ", ".join(raw_authors) if isinstance(raw_authors, list) else str(raw_authors)
+        doi = item.get("doi") or None
+        abstract = item.get("enAbstract") or item.get("zhAbstract") or ""
+        citation_nums = item.get("citationNums") or 0
+        impact_factor = item.get("impactFactor") or None
+        publication = item.get("publicationEnName") or item.get("publicationZhName") or ""
+        cover_date_start = item.get("coverDateStart") or ""
+        year = None
+        if cover_date_start:
+            try:
+                year = int(cover_date_start[:4])
+            except (ValueError, IndexError):
+                pass
+
+        # Upsert into local DB
+        paper = db.query(Paper).filter(Paper.bohrium_paper_id == bohrium_id).first()
+        if paper:
+            paper.title = title
+            paper.authors = authors
+            paper.doi = doi
+            paper.abstract = abstract
+            paper.citation_nums = citation_nums
+            paper.impact_factor = impact_factor
+            paper.publication = publication or None
+            paper.year = year
+            paper.cover_date_start = cover_date_start or None
+        else:
+            paper = Paper(
+                bohrium_paper_id=bohrium_id,
+                title=title,
+                authors=authors,
+                doi=doi,
+                abstract=abstract,
+                citation_nums=citation_nums,
+                impact_factor=impact_factor,
+                publication=publication or None,
+                year=year,
+                cover_date_start=cover_date_start or None,
+            )
+            db.add(paper)
+
+        try:
+            db.flush()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Failed to upsert paper bohrium_id=%s: %s", bohrium_id, exc)
+            continue
+
         results.append({
-            "paperId": paper_id,
-            "title": item.get("enName") or item.get("zhName") or "",
+            "id": paper.id,
+            "bohrium_paper_id": bohrium_id,
+            "title": title,
             "titleZh": item.get("zhName") or "",
-            "authors": item.get("authors") or "",
-            "doi": item.get("doi") or "",
-            "abstract": item.get("enAbstract") or item.get("zhAbstract") or "",
+            "authors": authors,
+            "doi": doi or "",
+            "abstract": abstract,
             "abstractZh": item.get("zhAbstract") or "",
-            "impactFactor": item.get("impactFactor"),
-            "publication": item.get("publicationEnName") or item.get("publicationZhName") or "",
-            "coverDateStart": item.get("coverDateStart") or "",
-            "citationNums": item.get("citationNums") or 0,
+            "impactFactor": impact_factor,
+            "publication": publication,
+            "coverDateStart": cover_date_start,
+            "citationNums": citation_nums,
             "paperUrl": item.get("paperUrl") or "",
+            "year": year,
         })
 
+    db.commit()
     return {"items": results, "total": len(results)}
 
 

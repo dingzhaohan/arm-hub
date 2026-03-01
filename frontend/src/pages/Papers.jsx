@@ -3,6 +3,74 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 
+function PaperCard({ paper, linkTo }) {
+  const title = paper.title || ''
+  const titleZh = paper.titleZh || ''
+  const authors = paper.authors || ''
+  const year = paper.year || null
+  const publication = paper.publication || ''
+  const citationNums = paper.citationNums ?? paper.citation_nums ?? 0
+  const impactFactor = paper.impactFactor ?? paper.impact_factor ?? null
+  const doi = paper.doi || ''
+  const abstract = paper.abstract || ''
+  const armSeriesCount = paper.arm_series_count ?? null
+
+  return (
+    <Link to={linkTo}
+      className="block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+      {/* Title */}
+      <h3 className="font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2">{title}</h3>
+      {titleZh && titleZh !== title && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{titleZh}</p>
+      )}
+
+      {/* Authors */}
+      {authors && (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 line-clamp-1">{authors}</p>
+      )}
+
+      {/* Meta badges */}
+      <div className="flex flex-wrap items-center gap-2 mt-3">
+        {year && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">
+            {year}
+          </span>
+        )}
+        {publication && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 max-w-[200px] truncate">
+            {publication}
+          </span>
+        )}
+        {citationNums > 0 && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">
+            Cited {citationNums}
+          </span>
+        )}
+        {impactFactor && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">
+            IF {impactFactor}
+          </span>
+        )}
+        {armSeriesCount != null && armSeriesCount > 0 && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-400">
+            {armSeriesCount} ARM series
+          </span>
+        )}
+      </div>
+
+      {/* DOI */}
+      {doi && (
+        <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 truncate">DOI: {doi}</p>
+      )}
+
+      {/* Abstract */}
+      {abstract && (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 line-clamp-3 leading-relaxed">{abstract}</p>
+      )}
+    </Link>
+  )
+}
+
 export default function Papers() {
   const [papers, setPapers] = useState([])
   const [total, setTotal] = useState(0)
@@ -26,31 +94,12 @@ export default function Papers() {
     if (!search.trim()) return
     setBohriumLoading(true)
     api.searchBohriumPapers({ query: search, page_size: 20 })
-      .then(setBohriumResults)
+      .then(data => {
+        setBohriumResults(data)
+        loadPapers()
+      })
       .catch(e => alert(e.message))
       .finally(() => setBohriumLoading(false))
-  }
-
-  const handleEnsure = async (paper) => {
-    try {
-      const year = paper.coverDateStart ? parseInt(paper.coverDateStart.slice(0, 4), 10) : null
-      await api.ensurePaper({
-        bohrium_paper_id: paper.paperId || paper.doi || String(paper.id || ''),
-        title: paper.title,
-        authors: paper.authors || '',
-        abstract: paper.abstract || '',
-        doi: paper.doi || null,
-        citation_nums: paper.citationNums || 0,
-        impact_factor: paper.impactFactor || null,
-        year: year,
-        publication: paper.publication || null,
-        cover_date_start: paper.coverDateStart || null,
-      })
-      loadPapers()
-      alert('Paper added to ARM Hub!')
-    } catch (e) {
-      alert(e.message)
-    }
   }
 
   return (
@@ -77,38 +126,21 @@ export default function Papers() {
 
       {/* Bohrium search results */}
       {bohriumResults && (
-        <div className="mb-8 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl p-4 border border-indigo-200 dark:border-indigo-800">
+        <div className="mb-8">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-indigo-900 dark:text-indigo-200">
+            <h3 className="font-semibold text-gray-900 dark:text-white">
               Search Results ({bohriumResults.total || 0})
             </h3>
-            <button onClick={() => setBohriumResults(null)} className="text-xs text-gray-500 hover:text-gray-700">Close</button>
+            <button onClick={() => setBohriumResults(null)} className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">Close</button>
           </div>
-          {(bohriumResults.items || []).map((paper, i) => (
-            <div key={i} className="flex items-start justify-between py-3 border-b border-indigo-100 dark:border-indigo-800 last:border-0">
-              <div className="flex-1 min-w-0 mr-4">
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{paper.title}</p>
-                {paper.titleZh && paper.titleZh !== paper.title && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{paper.titleZh}</p>
-                )}
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  {paper.authors ? paper.authors.slice(0, 100) : ''}
-                  {paper.coverDateStart ? ` · ${paper.coverDateStart.slice(0, 4)}` : ''}
-                  {paper.publication ? ` · ${paper.publication}` : ''}
-                </p>
-                <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
-                  {paper.citationNums > 0 && <span>{paper.citationNums} citations</span>}
-                  {paper.impactFactor && <span>IF: {paper.impactFactor}</span>}
-                  {paper.doi && <span>DOI: {paper.doi}</span>}
-                </div>
-              </div>
-              <button onClick={() => handleEnsure(paper)} className="px-3 py-1.5 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700 shrink-0">
-                Add to Hub
-              </button>
+          {(bohriumResults.items || []).length === 0 ? (
+            <p className="text-sm text-gray-500 dark:text-gray-400">No results found</p>
+          ) : (
+            <div className="space-y-3">
+              {(bohriumResults.items || []).map((paper) => (
+                <PaperCard key={paper.id || paper.bohrium_paper_id} paper={paper} linkTo={`/papers/${paper.id}`} />
+              ))}
             </div>
-          ))}
-          {(bohriumResults.items || []).length === 0 && (
-            <p className="text-sm text-gray-500">No results found</p>
           )}
         </div>
       )}
@@ -121,17 +153,7 @@ export default function Papers() {
       ) : (
         <div className="space-y-3">
           {papers.map(paper => (
-            <Link key={paper.id} to={`/papers/${paper.id}`}
-              className="block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
-              <h3 className="font-medium text-gray-900 dark:text-white mb-1">{paper.title}</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">{paper.authors}</p>
-              <div className="flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500">
-                {paper.year && <span>{paper.year}</span>}
-                {paper.publication && <span>{paper.publication}</span>}
-                <span>{paper.arm_series_count || 0} ARM series</span>
-                {paper.citation_nums > 0 && <span>{paper.citation_nums} citations</span>}
-              </div>
-            </Link>
+            <PaperCard key={paper.id} paper={paper} linkTo={`/papers/${paper.id}`} />
           ))}
         </div>
       )}
