@@ -1,0 +1,17 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@import "highlight.js/styles/github.css";
+
+.dark .hljs {
+  color: #c9d1d9;
+  background: #0d1117;
+}
+.dark .hljs-keyword, .dark .hljs-type { color: #ff7b72; }
+.dark .hljs-title, .dark .hljs-title.function_ { color: #d2a8ff; }
+.dark .hljs-attr, .dark .hljs-number, .dark .hljs-variable { color: #79c0ff; }
+.dark .hljs-string { color: #a5d6ff; }
+.dark .hljs-comment { color: #8b949e; }
+.dark .hljs-name { color: #7ee787; }
