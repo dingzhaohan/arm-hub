@@ -168,35 +168,32 @@ function StepSelectPaper({ paper, setPaper, onNext, setError }) {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
-  const [localResults, setLocalResults] = useState([])
 
   function handleSearch() {
     if (!search.trim()) return
     setError('')
     setSearching(true)
-    Promise.all([
-      api.getPapers({ search: search.trim(), limit: 10 }),
-      api.searchBohriumPapers({ keyword: search.trim() }).catch(() => ({ items: [] })),
-    ]).then(([local, bohrium]) => {
-      setLocalResults(local.items || [])
-      setResults(bohrium.items || [])
-    }).catch(e => setError(e.message))
+    api.searchBohriumPapers({ query: search.trim(), page_size: 10 })
+      .then(data => setResults(data.items || []))
+      .catch(e => setError(e.message))
       .finally(() => setSearching(false))
   }
 
   async function selectBohriumPaper(bp) {
     setError('')
     try {
+      const year = bp.coverDateStart ? parseInt(bp.coverDateStart.slice(0, 4), 10) : null
       const p = await api.ensurePaper({
-        bohrium_paper_id: bp.bohrium_paper_id || bp.id,
+        bohrium_paper_id: bp.paperId || bp.id,
         title: bp.title,
-        authors: bp.authors,
-        abstract: bp.abstract,
-        doi: bp.doi,
-        year: bp.year,
-        citation_nums: bp.citation_nums,
-        impact_factor: bp.impact_factor,
-        publication: bp.publication,
+        authors: bp.authors || '',
+        abstract: bp.abstract || '',
+        doi: bp.doi || null,
+        citation_nums: bp.citationNums || 0,
+        impact_factor: bp.impactFactor || null,
+        year: year,
+        publication: bp.publication || null,
+        cover_date_start: bp.coverDateStart || null,
       })
       setPaper(p)
     } catch (e) {
@@ -239,28 +236,18 @@ function StepSelectPaper({ paper, setPaper, onNext, setError }) {
             </button>
           </div>
 
-          {localResults.length > 0 && (
-            <div className="mb-4">
-              <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Local Papers</h4>
-              <div className="space-y-2">
-                {localResults.map(p => (
-                  <button key={p.id} onClick={() => { setPaper(p) }} className="w-full text-left bg-gray-50 dark:bg-gray-800 rounded-lg p-3 hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <div className="font-medium text-sm text-gray-900 dark:text-white">{p.title}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{p.authors}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {results.length > 0 && (
             <div>
-              <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Bohrium Search Results</h4>
+              <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">Search Results</h4>
               <div className="space-y-2">
                 {results.map((bp, i) => (
                   <button key={i} onClick={() => selectBohriumPaper(bp)} className="w-full text-left bg-gray-50 dark:bg-gray-800 rounded-lg p-3 hover:bg-gray-100 dark:hover:bg-gray-700">
                     <div className="font-medium text-sm text-gray-900 dark:text-white">{bp.title}</div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{bp.authors}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {bp.authors ? bp.authors.slice(0, 100) : ''}
+                      {bp.coverDateStart ? ` · ${bp.coverDateStart.slice(0, 4)}` : ''}
+                      {bp.publication ? ` · ${bp.publication}` : ''}
+                    </div>
                   </button>
                 ))}
               </div>

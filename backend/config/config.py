@@ -22,6 +22,11 @@ BOHRIUM_CORE_API = os.getenv("BOHRIUM_CORE_API", "https://bohrium-core.dp.tech")
 BOHRIUM_OPENPLATFORM_API = os.getenv("BOHRIUM_OPENPLATFORM_API", "https://openapi.dp.tech")
 BOHRIUM_OPENPLATFORM_AK = os.getenv("BOHRIUM_OPENPLATFORM_AK", "")
 
+# ─── Bohrium RAG (Paper Search) ───────────────────────────
+BOHRIUM_BASE_URL = os.getenv("BOHRIUM_BASE_URL", "https://uat.bohrium.com")
+BOHRIUM_RAG_ACCESS_KEY = os.getenv("BOHRIUM_RAG_ACCESS_KEY", "")
+BOHRIUM_RAG_ACCESS_SECRET = os.getenv("BOHRIUM_RAG_ACCESS_SECRET", "")
+
 # ─── OSS ───────────────────────────────────────────────────
 OSS_ENDPOINT = os.getenv("OSS_ENDPOINT", "")
 OSS_BUCKET = os.getenv("OSS_BUCKET", "arm-hub")

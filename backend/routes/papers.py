@@ -1,10 +1,13 @@
 """Paper routes: search, ensure, CRUD, aggregated associations."""
+import hashlib
 import json
 import logging
 import urllib.request
 import urllib.error
+from datetime import datetime
 from typing import Optional
 
+import pytz
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
@@ -17,8 +20,7 @@ from schemas import (
 )
 from app_config import limiter
 from auth import get_current_user, require_login
-from bohrium_auth import get_user_access_key
-from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK
+from config.config import BOHRIUM_BASE_URL, BOHRIUM_RAG_ACCESS_KEY, BOHRIUM_RAG_ACCESS_SECRET
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/papers", tags=["papers"])
@@ -34,7 +36,15 @@ def _paper_to_out(p: Paper, db: Session) -> PaperOut:
     return out
 
 
-# ─── Bohrium Online Search (login required) ────────────────
+# ─── Bohrium RAG Paper Search ─────────────────────────────
+
+def _get_digest():
+    """SHA-512 digest: accessKey + accessSecret[:10] + currentMinutes (Shanghai TZ)."""
+    shanghai_tz = pytz.timezone("Asia/Shanghai")
+    current_minutes = datetime.now(shanghai_tz).strftime("%Y%m%d%H%M")
+    data = BOHRIUM_RAG_ACCESS_KEY + BOHRIUM_RAG_ACCESS_SECRET[:10] + current_minutes
+    return hashlib.sha512(data.encode()).hexdigest()
+
 
 @router.post("/search/bohrium")
 @limiter.limit("10/minute")
@@ -44,35 +54,63 @@ def search_bohrium_papers(
     user=Depends(require_login),
     db: Session = Depends(get_db),
 ):
-    # Use the configured open-platform AK, fallback to per-user AK
-    if BOHRIUM_OPENPLATFORM_AK:
-        ak = BOHRIUM_OPENPLATFORM_AK
-    else:
-        ak = get_user_access_key(user.bohrium_id, user.bohrium_org_id)
+    if not BOHRIUM_RAG_ACCESS_KEY or not BOHRIUM_RAG_ACCESS_SECRET:
+        raise HTTPException(500, "Bohrium RAG credentials not configured")
 
-    url = f"{BOHRIUM_OPENPLATFORM_API}/v1/knowledge/paper/search"
+    words = [w.strip() for w in data.query.split() if w.strip()]
     payload = json.dumps({
-        "query": data.query,
-        "page": data.page,
-        "size": data.size,
+        "accessKey": BOHRIUM_RAG_ACCESS_KEY,
+        "digester": _get_digest(),
+        "userId": str(user.bohrium_id or user.id),
+        "type": 3,
+        "words": words,
+        "areaIds": [],
+        "question": data.query,
+        "startTime": "",
+        "endTime": "",
+        "pageSize": data.page_size,
     }).encode()
+
+    url = f"{BOHRIUM_BASE_URL}/rag/pass/keyword"
     req = urllib.request.Request(url, data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
-    req.add_header("accessKey", ak)
+
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        logger.error("Bohrium paper search returned %s", e.code)
+        detail = ""
+        try:
+            detail = e.read().decode()[:500]
+        except Exception:
+            pass
+        logger.error("Bohrium RAG search returned %s: %s", e.code, detail)
         raise HTTPException(502, "Bohrium paper search failed")
     except Exception as e:
-        logger.error("Bohrium paper search error: %s", e)
+        logger.error("Bohrium RAG search error: %s", e)
         raise HTTPException(502, "Failed to reach Bohrium paper search")
 
-    if body.get("code") != 0:
-        raise HTTPException(502, f"Bohrium search error: {body.get('message', 'unknown')}")
+    raw_items = body.get("data") or []
 
-    return body.get("data", {})
+    # Map RAG response fields to our format
+    results = []
+    for item in raw_items:
+        results.append({
+            "paperId": item.get("paperId", ""),
+            "title": item.get("enName") or item.get("zhName") or "",
+            "titleZh": item.get("zhName") or "",
+            "authors": item.get("authors") or "",
+            "doi": item.get("doi") or "",
+            "abstract": item.get("enAbstract") or item.get("zhAbstract") or "",
+            "abstractZh": item.get("zhAbstract") or "",
+            "impactFactor": item.get("impactFactor"),
+            "publication": item.get("publicationEnName") or item.get("publicationZhName") or "",
+            "coverDateStart": item.get("coverDateStart") or "",
+            "citationNums": item.get("citationNums") or 0,
+            "paperUrl": item.get("paperUrl") or "",
+        })
+
+    return {"items": results, "total": len(results)}
 
 
 # ─── Ensure (upsert) ───────────────────────────────────────

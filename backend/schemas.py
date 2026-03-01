@@ -55,8 +55,7 @@ class PaperOut(BaseModel):
 
 class BohriumSearchIn(BaseModel):
     query: str = Field(..., min_length=1, max_length=500)
-    page: int = Field(1, ge=1)
-    size: int = Field(10, ge=1, le=50)
+    page_size: int = Field(10, ge=1, le=50)
 
 
 # ─── ARM Series ────────────────────────────────────────────
