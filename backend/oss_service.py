@@ -56,13 +56,13 @@ def get_sts_token(path_prefix: str, duration_seconds: int = 3600) -> dict:
         region_id,
     )
 
-    # Scope the token to only allow PutObject under the given prefix
+    # Grant full OSS access under the given prefix
     policy = json.dumps({
         "Version": "1",
         "Statement": [
             {
                 "Effect": "Allow",
-                "Action": ["oss:PutObject"],
+                "Action": ["oss:*"],
                 "Resource": [
                     f"acs:oss:*:*:{OSS_BUCKET}/{path_prefix}/*",
                 ],

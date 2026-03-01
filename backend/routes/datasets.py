@@ -63,6 +63,7 @@ def dataset_upload_credential(
 
     try:
         sts = oss_service.get_sts_token(path_prefix, duration_seconds=3600)
+        upload_url = oss_service.sign_upload_url(object_key, expires=3600)
     except Exception as e:
         raise HTTPException(500, f"Failed to generate upload credentials: {e}")
 
@@ -74,6 +75,7 @@ def dataset_upload_credential(
         "region": region,
         "endpoint": OSS_ENDPOINT,
         "object_key": object_key,
+        "upload_url": upload_url,
         "access_key_id": sts["access_key_id"],
         "access_key_secret": sts["access_key_secret"],
         "security_token": sts["security_token"],

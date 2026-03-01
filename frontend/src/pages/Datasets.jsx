@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import OSS from 'ali-oss'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -92,17 +93,21 @@ function CreateDatasetForm({ onClose, onCreated }) {
         setUploading(true)
         const cred = await api.getDatasetUploadCredential(ds.id)
 
-        // Step 3: Upload file to OSS
-        const xhr = new XMLHttpRequest()
-        await new Promise((resolve, reject) => {
-          xhr.upload.onprogress = (ev) => {
-            if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100))
-          }
-          xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed: ${xhr.status}`))
-          xhr.onerror = () => reject(new Error('Upload network error'))
-          xhr.open('PUT', cred.upload_url)
-          xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-          xhr.send(file)
+        // Step 3: Upload file to OSS via ali-oss SDK
+        const safeFile = new File([file], 'dataset.zip', { type: file.type || 'application/zip' })
+        const client = new OSS({
+          region: `oss-${cred.region}`,
+          accessKeyId: cred.access_key_id,
+          accessKeySecret: cred.access_key_secret,
+          stsToken: cred.security_token,
+          bucket: cred.bucket,
+          secure: true,
+        })
+
+        await client.put(cred.object_key, safeFile, {
+          progress: (p) => {
+            setProgress(Math.round(p * 100))
+          },
         })
 
         // Step 4: Complete

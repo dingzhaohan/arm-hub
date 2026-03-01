@@ -185,7 +185,7 @@ function StepSelectPaper({ paper, setPaper, onNext, setError }) {
     try {
       const year = bp.coverDateStart ? parseInt(bp.coverDateStart.slice(0, 4), 10) : null
       const p = await api.ensurePaper({
-        bohrium_paper_id: bp.paperId || bp.id,
+        bohrium_paper_id: bp.paperId || bp.id || bp.doi || '',
         title: bp.title,
         authors: bp.authors || '',
         abstract: bp.abstract || '',

@@ -95,8 +95,9 @@ def search_bohrium_papers(
     # Map RAG response fields to our format
     results = []
     for item in raw_items:
+        paper_id = item.get("paperId") or item.get("id") or item.get("doi") or ""
         results.append({
-            "paperId": item.get("paperId", ""),
+            "paperId": paper_id,
             "title": item.get("enName") or item.get("zhName") or "",
             "titleZh": item.get("zhName") or "",
             "authors": item.get("authors") or "",

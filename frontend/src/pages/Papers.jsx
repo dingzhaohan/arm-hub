@@ -35,7 +35,7 @@ export default function Papers() {
     try {
       const year = paper.coverDateStart ? parseInt(paper.coverDateStart.slice(0, 4), 10) : null
       await api.ensurePaper({
-        bohrium_paper_id: paper.paperId || String(paper.id),
+        bohrium_paper_id: paper.paperId || paper.doi || String(paper.id || ''),
         title: paper.title,
         authors: paper.authors || '',
         abstract: paper.abstract || '',
