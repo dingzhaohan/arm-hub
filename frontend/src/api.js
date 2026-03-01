@@ -74,6 +74,28 @@ export const api = {
   getDatasetPapers: (id) => request(`/datasets/${id}/papers`),
   downloadDataset: (id) => request(`/datasets/${id}/download`),
   getDatasetUploadCredential: (id) => request(`/datasets/${id}/upload-credential`, { method: 'POST' }),
+  uploadDataset: (id, file, onProgress) => {
+    const token = getAuthToken()
+    const formData = new FormData()
+    formData.append('file', file)
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable && onProgress) onProgress(Math.round((ev.loaded / ev.total) * 100))
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText))
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status}`))
+        }
+      }
+      xhr.onerror = () => reject(new Error('Upload network error'))
+      xhr.open('POST', `/api/datasets/${id}/upload`)
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.send(formData)
+    })
+  },
   completeDataset: (id, params) => {
     const q = new URLSearchParams(params).toString()
     return request(`/datasets/${id}/complete?${q}`, { method: 'POST' })

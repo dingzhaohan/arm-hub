@@ -5,6 +5,12 @@ export const BOHRIUM_CONFIG = {
     PLATFORM: 'https://platform.bohrium.com',
     USER_API: '/api/auth/bohrium/me',
   },
+  test: {
+    COOKIE_NAME: 'test-brmToken',
+    COOKIE_DOMAIN: '.test.bohrium.com',
+    PLATFORM: 'https://platform.test.bohrium.com',
+    USER_API: '/api/auth/bohrium/me',
+  },
   dev: {
     COOKIE_NAME: 'test-brmToken',
     COOKIE_DOMAIN: '.test.bohrium.com',

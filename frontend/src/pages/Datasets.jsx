@@ -88,28 +88,9 @@ function CreateDatasetForm({ onClose, onCreated }) {
       const ds = await api.createDataset({ name: name.trim(), description: description.trim() })
 
       if (file) {
-        // Step 2: Get upload credential
+        // Step 2: Upload file via backend proxy (no AK exposed)
         setUploading(true)
-        const cred = await api.getDatasetUploadCredential(ds.id)
-
-        // Step 3: Upload file to OSS
-        const xhr = new XMLHttpRequest()
-        await new Promise((resolve, reject) => {
-          xhr.upload.onprogress = (ev) => {
-            if (ev.lengthComputable) setProgress(Math.round((ev.loaded / ev.total) * 100))
-          }
-          xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed: ${xhr.status}`))
-          xhr.onerror = () => reject(new Error('Upload network error'))
-          xhr.open('PUT', cred.upload_url)
-          xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-          xhr.send(file)
-        })
-
-        // Step 4: Complete
-        await api.completeDataset(ds.id, {
-          oss_key: cred.object_key,
-          size_bytes: file.size,
-        })
+        await api.uploadDataset(ds.id, file, (pct) => setProgress(pct))
       }
 
       onCreated()

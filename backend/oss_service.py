@@ -60,17 +60,23 @@ def head_object(key: str) -> dict:
     }
 
 
-def sign_url(key: str, expires: int = 3600, method: str = "GET") -> str:
+def sign_url(key: str, expires: int = 3600, method: str = "GET",
+             headers: dict | None = None) -> str:
     """Generate a pre-signed URL for download (GET) or upload (PUT)."""
-    return get_bucket().sign_url(method, key, expires)
+    kwargs = {"slash_safe": True}
+    if headers:
+        kwargs["headers"] = headers
+    return get_bucket().sign_url(method, key, expires, **kwargs)
 
 
 def sign_download_url(key: str, expires: int = 3600) -> str:
     return sign_url(key, expires, "GET")
 
 
-def sign_upload_url(key: str, expires: int = 3600) -> str:
-    return sign_url(key, expires, "PUT")
+def sign_upload_url(key: str, expires: int = 3600,
+                    content_type: str = "application/octet-stream") -> str:
+    return sign_url(key, expires, "PUT",
+                    headers={"Content-Type": content_type})
 
 
 def list_objects(prefix: str, delimiter: str = "/", max_keys: int = 1000) -> dict:

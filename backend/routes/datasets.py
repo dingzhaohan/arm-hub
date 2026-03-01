@@ -1,7 +1,7 @@
 """Dataset routes: CRUD, upload, download, reverse associations."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
@@ -52,6 +52,7 @@ def dataset_upload_credential(
     user=Depends(require_login),
     db: Session = Depends(get_db),
 ):
+    """Legacy: returns signed URL. Kept for backward compat."""
     ds = db.query(Dataset).filter(Dataset.id == dataset_id).first()
     if not ds:
         raise HTTPException(404, "Dataset not found")
@@ -66,6 +67,46 @@ def dataset_upload_credential(
         "object_key": object_key,
         "upload_url": upload_url,
         "expire_at": "",
+    }
+
+
+@router.post("/{dataset_id}/upload")
+@limiter.limit("10/minute")
+def dataset_upload(
+    request: Request,
+    dataset_id: int,
+    file: UploadFile = File(...),
+    user=Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Upload dataset file via backend proxy (no AK exposed to client)."""
+    ds = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+    if not ds:
+        raise HTTPException(404, "Dataset not found")
+    if ds.uploader_user_id != user.id:
+        raise HTTPException(403, "Not the owner")
+
+    # Read file content
+    content = file.file.read()
+    size_bytes = len(content)
+
+    # Upload to OSS via SDK
+    object_key = f"datasets/{dataset_id}/users/{user.bohrium_id}/dataset.zip"
+    try:
+        oss_service.put_object(object_key, content)
+    except Exception as e:
+        raise HTTPException(500, f"OSS upload failed: {e}")
+
+    # Update dataset record
+    ds.oss_key = object_key
+    ds.oss_bucket = OSS_BUCKET
+    ds.size_bytes = size_bytes
+    db.commit()
+
+    return {
+        "ok": True,
+        "object_key": object_key,
+        "size_bytes": size_bytes,
     }
 
 
