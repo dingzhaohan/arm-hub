@@ -1,6 +1,5 @@
 """ARM Series and Version routes: CRUD, upload credential, complete."""
 import logging
-from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
@@ -12,12 +11,12 @@ from database import (
 )
 from schemas import (
     ARMSeriesCreateIn, ARMSeriesOut, ARMVersionCreateIn, ARMVersionOut,
-    UploadCredentialIn, UploadCredentialOut, ModuleCompleteIn,
+    UploadCredentialIn, ModuleCompleteIn,
     DatasetBrief, SkillBrief,
 )
 from app_config import limiter
 from auth import get_current_user, require_login
-from config.config import OSS_BUCKET
+from config.config import OSS_BUCKET, OSS_ENDPOINT
 import oss_service
 
 logger = logging.getLogger(__name__)
@@ -204,7 +203,7 @@ def delete_arm_version(
     return {"detail": "Deleted"}
 
 
-# ─── Upload Credential (signed PUT URL) ───────────────────
+# ─── Upload Credential (STS Token) ─────────────────────────
 
 @router_versions.post("/{arm_version_id}/upload-credential")
 @limiter.limit("30/minute")
@@ -233,20 +232,34 @@ def get_upload_credential(
     if not object_key:
         raise HTTPException(400, f"Invalid module: {data.module}")
 
+    # Path prefix for STS policy scoping
+    path_prefix = object_key.rsplit("/", 1)[0]
+
     # Update status to uploading
     if v.status == "draft":
         v.status = "uploading"
         db.commit()
 
-    # Generate signed PUT URL for direct upload
-    upload_url = oss_service.sign_upload_url(object_key, expires=3600)
-    expire_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    # Get STS temporary credentials
+    try:
+        sts = oss_service.get_sts_token(path_prefix, duration_seconds=3600)
+    except Exception as e:
+        logger.error("STS token generation failed: %s", e)
+        raise HTTPException(500, f"Failed to generate upload credentials: {e}")
+
+    # Extract region/endpoint for frontend
+    endpoint = OSS_ENDPOINT.replace("https://", "").replace("http://", "")
+    region = endpoint.split(".")[0].replace("oss-", "")
 
     return {
         "bucket": OSS_BUCKET,
+        "region": region,
+        "endpoint": OSS_ENDPOINT,
         "object_key": object_key,
-        "upload_url": upload_url,
-        "expire_at": expire_at,
+        "access_key_id": sts["access_key_id"],
+        "access_key_secret": sts["access_key_secret"],
+        "security_token": sts["security_token"],
+        "expiration": sts["expiration"],
     }
 
 

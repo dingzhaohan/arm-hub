@@ -127,11 +127,13 @@ class UploadCredentialIn(BaseModel):
 
 class UploadCredentialOut(BaseModel):
     bucket: str
+    region: str
+    endpoint: str
     object_key: str
     access_key_id: str
     access_key_secret: str
     security_token: str
-    expire_at: str
+    expiration: str
 
 
 class ModuleCompleteIn(BaseModel):

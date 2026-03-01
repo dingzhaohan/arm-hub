@@ -11,7 +11,7 @@ from database import (
 from schemas import SkillCreateIn, SkillOut, SkillBrief
 from app_config import limiter
 from auth import get_current_user, require_login
-from config.config import OSS_BUCKET
+from config.config import OSS_BUCKET, OSS_ENDPOINT
 import oss_service
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
@@ -59,16 +59,28 @@ def skill_upload_credential(
     if skill.uploader_user_id != user.id:
         raise HTTPException(403, "Not the owner")
 
-    # Generate signed PUT URLs for zip and md
     zip_key = f"skills/{skill_id}/users/{user.bohrium_id}/skill.zip"
     md_key = f"skills/{skill_id}/users/{user.bohrium_id}/skill.md"
+    path_prefix = f"skills/{skill_id}/users/{user.bohrium_id}"
+
+    try:
+        sts = oss_service.get_sts_token(path_prefix, duration_seconds=3600)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate upload credentials: {e}")
+
+    endpoint = OSS_ENDPOINT.replace("https://", "").replace("http://", "")
+    region = endpoint.split(".")[0].replace("oss-", "")
+
     return {
         "bucket": OSS_BUCKET,
+        "region": region,
+        "endpoint": OSS_ENDPOINT,
         "zip_object_key": zip_key,
         "md_object_key": md_key,
-        "zip_upload_url": oss_service.sign_upload_url(zip_key, expires=3600),
-        "md_upload_url": oss_service.sign_upload_url(md_key, expires=3600),
-        "expire_at": "",
+        "access_key_id": sts["access_key_id"],
+        "access_key_secret": sts["access_key_secret"],
+        "security_token": sts["security_token"],
+        "expiration": sts["expiration"],
     }
 
 

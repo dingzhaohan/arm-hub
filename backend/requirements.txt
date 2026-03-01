@@ -9,3 +9,5 @@ slowapi>=0.1.9
 httpx>=0.27.0
 oss2>=2.18.0
 pytz>=2023.3
+aliyun-python-sdk-core>=2.15.0
+aliyun-python-sdk-sts>=3.1.0

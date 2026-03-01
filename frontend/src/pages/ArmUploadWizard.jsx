@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import OSS from 'ali-oss'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -427,33 +428,32 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
     setProgress(0)
 
     try {
-      // Step 1: Get upload credential (signed PUT URL)
+      // Step 1: Get STS token from backend
       const cred = await api.getUploadCredential(version.id, {
         module,
         filename,
       })
 
-      // Step 2: Upload directly to OSS using signed PUT URL
-      const xhr = new XMLHttpRequest()
-      await new Promise((resolve, reject) => {
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 100))
-        }
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) resolve()
-          else reject(new Error(`Upload failed: ${xhr.status}`))
-        }
-        xhr.onerror = () => reject(new Error('Upload network error'))
-        xhr.open('PUT', cred.upload_url)
-        xhr.setRequestHeader('Content-Type', 'application/octet-stream')
-        xhr.send(file)
+      // Step 2: Upload via ali-oss SDK with STS credentials
+      const client = new OSS({
+        region: `oss-${cred.region}`,
+        accessKeyId: cred.access_key_id,
+        accessKeySecret: cred.access_key_secret,
+        stsToken: cred.security_token,
+        bucket: cred.bucket,
+      })
+
+      await client.put(cred.object_key, file, {
+        progress: (p) => {
+          setProgress(Math.round(p * 100))
+        },
       })
 
       // Step 3: Record the object key
       setUploads(prev => ({ ...prev, [module]: cred.object_key }))
       setProgress(100)
     } catch (e) {
-      setError(e.message)
+      setError(e.message || 'Upload failed')
     } finally {
       setUploading(false)
     }

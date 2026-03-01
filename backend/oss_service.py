@@ -1,4 +1,4 @@
-"""OSS service: upload, download, signed URLs, code.zip extraction, manifest generation."""
+"""OSS service: upload, download, STS tokens, signed URLs, code.zip extraction, manifest generation."""
 import io
 import json
 import logging
@@ -8,8 +8,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import oss2
+from aliyunsdkcore import client as aliyun_client
+from aliyunsdksts.request.v20150401.AssumeRoleRequest import AssumeRoleRequest
 
-from config.config import OSS_ENDPOINT, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET
+from config.config import (
+    OSS_ENDPOINT, OSS_BUCKET, OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, OSS_ROLE_ARN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,59 @@ def get_bucket() -> oss2.Bucket:
 
 def is_configured() -> bool:
     return bool(OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET and OSS_ENDPOINT)
+
+
+# ─── STS Token ────────────────────────────────────────────
+
+def get_sts_token(path_prefix: str, duration_seconds: int = 3600) -> dict:
+    """Get temporary STS credentials scoped to a path prefix in the bucket.
+
+    Returns dict with accessKeyId, accessKeySecret, securityToken, expiration.
+    """
+    if not OSS_ROLE_ARN:
+        raise RuntimeError("OSS_ROLE_ARN not configured — required for STS")
+
+    # Extract region from endpoint, e.g. https://oss-cn-beijing.aliyuncs.com → cn-beijing
+    endpoint_host = OSS_ENDPOINT.replace("https://", "").replace("http://", "")
+    region_id = endpoint_host.split(".")[0].replace("oss-", "")
+
+    acs_client = aliyun_client.AcsClient(
+        OSS_ACCESS_KEY_ID,
+        OSS_ACCESS_KEY_SECRET,
+        region_id,
+    )
+
+    # Scope the token to only allow PutObject under the given prefix
+    policy = json.dumps({
+        "Version": "1",
+        "Statement": [
+            {
+                "Effect": "Allow",
+                "Action": ["oss:PutObject"],
+                "Resource": [
+                    f"acs:oss:*:*:{OSS_BUCKET}/{path_prefix}/*",
+                ],
+            }
+        ],
+    })
+
+    req = AssumeRoleRequest()
+    req.set_accept_format("json")
+    req.set_RoleArn(OSS_ROLE_ARN)
+    req.set_RoleSessionName("arm-hub-upload")
+    req.set_DurationSeconds(duration_seconds)
+    req.set_Policy(policy)
+
+    resp = acs_client.do_action_with_exception(req)
+    data = json.loads(resp)
+    creds = data["Credentials"]
+
+    return {
+        "access_key_id": creds["AccessKeyId"],
+        "access_key_secret": creds["AccessKeySecret"],
+        "security_token": creds["SecurityToken"],
+        "expiration": creds["Expiration"],
+    }
 
 
 # ─── Basic operations ─────────────────────────────────────

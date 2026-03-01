@@ -12,7 +12,7 @@ from database import (
 from schemas import DatasetCreateIn, DatasetOut, DatasetBrief, ARMVersionOut, PaperOut
 from app_config import limiter
 from auth import get_current_user, require_login
-from config.config import OSS_BUCKET
+from config.config import OSS_BUCKET, OSS_ENDPOINT
 import oss_service
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
@@ -59,13 +59,25 @@ def dataset_upload_credential(
         raise HTTPException(403, "Not the owner")
 
     object_key = f"datasets/{dataset_id}/users/{user.bohrium_id}/dataset.zip"
-    upload_url = oss_service.sign_upload_url(object_key, expires=3600)
+    path_prefix = object_key.rsplit("/", 1)[0]
+
+    try:
+        sts = oss_service.get_sts_token(path_prefix, duration_seconds=3600)
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate upload credentials: {e}")
+
+    endpoint = OSS_ENDPOINT.replace("https://", "").replace("http://", "")
+    region = endpoint.split(".")[0].replace("oss-", "")
 
     return {
         "bucket": OSS_BUCKET,
+        "region": region,
+        "endpoint": OSS_ENDPOINT,
         "object_key": object_key,
-        "upload_url": upload_url,
-        "expire_at": "",
+        "access_key_id": sts["access_key_id"],
+        "access_key_secret": sts["access_key_secret"],
+        "security_token": sts["security_token"],
+        "expiration": sts["expiration"],
     }
 
 
