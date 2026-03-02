@@ -1,7 +1,7 @@
 """BohrClaw routes — provision and manage personal OpenClaw instances.
 
-Uses the platform-level access key (BOHRIUM_OPENPLATFORM_AK) for all
-openapi calls (project list, node creation, etc.).
+Fetches the user's personal access key from bohrium-core (via user ID),
+then uses it for all openapi calls (project list, node provisioning).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -11,7 +11,7 @@ from database import get_db, BohrClawInstance, User
 from schemas import BohrClawStatusOut
 from auth import get_current_user
 from app_config import limiter
-from config.config import BOHRIUM_OPENPLATFORM_AK
+from bohrium_auth import get_user_access_key
 from bohrclaw_provisioner import provision_bohrclaw, get_user_project_id
 
 router = APIRouter(prefix="/api/bohrclaw", tags=["bohrclaw"])
@@ -51,12 +51,6 @@ def launch_bohrclaw(
             detail="Bohrium account info incomplete — please re-login",
         )
 
-    if not BOHRIUM_OPENPLATFORM_AK:
-        raise HTTPException(
-            status_code=500,
-            detail="BOHRIUM_OPENPLATFORM_AK not configured",
-        )
-
     # Check for existing instance
     existing = db.query(BohrClawInstance).filter(
         BohrClawInstance.bohrium_user_id == user.bohrium_id
@@ -68,10 +62,10 @@ def launch_bohrclaw(
         db.delete(existing)
         db.commit()
 
-    # Use platform AK for all openapi operations
-    access_key = BOHRIUM_OPENPLATFORM_AK
+    # Step 1: Fetch the user's personal access key from bohrium-core
+    access_key = get_user_access_key(user.bohrium_id, user.bohrium_org_id)
 
-    # Step 1: Dynamically resolve the user's project ID via openapi
+    # Step 2: Dynamically resolve the user's project ID via openapi
     try:
         project_id = get_user_project_id(access_key)
     except Exception as e:
@@ -83,7 +77,7 @@ def launch_bohrclaw(
     db.commit()
     db.refresh(instance)
 
-    # Step 2: Run the full provisioning pipeline
+    # Step 3: Run the full provisioning pipeline
     try:
         result = provision_bohrclaw(
             email=user.email,
