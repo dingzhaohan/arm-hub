@@ -6,8 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from database import (
-    get_db, ARMSeries, ARMVersion, Paper, Dataset, Skill, User,
-    arm_version_datasets, arm_version_skills,
+    get_db, ARMSeries, ARMVersion, Paper, User,
 )
 from schemas import (
     ARMSeriesCreateIn, ARMSeriesOut, ARMVersionCreateIn, ARMVersionOut,
@@ -222,6 +221,7 @@ def get_upload_credential(
 
     # Build object key based on module
     module_paths = {
+        "arm": f"{v.storage_prefix}/arm/{data.filename}",
         "code": f"{v.storage_prefix}/code/{data.filename}",
         "report": f"{v.storage_prefix}/report/{data.filename}",
         "trace": f"{v.storage_prefix}/trace/{data.filename}",
@@ -282,55 +282,27 @@ def complete_arm_version(
     if v.status not in ("draft", "uploading"):
         raise HTTPException(400, f"Cannot complete: current status is '{v.status}'")
 
-    # Validate required modules
-    errors = []
-    if not data.code_zip_key:
-        errors.append("code_zip_key is required")
-    if not data.report_md_key:
-        errors.append("report_md_key is required")
-    if not data.trace_zip_key:
-        errors.append("trace_zip_key is required")
-    if not data.dataset_ids:
-        errors.append("At least one dataset is required")
-    if errors:
-        raise HTTPException(400, "; ".join(errors))
+    # Verify arm.zip exists in OSS
+    if not oss_service.object_exists(data.arm_zip_key):
+        raise HTTPException(400, f"arm.zip not found in OSS at key: {data.arm_zip_key}")
 
-    # Verify files exist in OSS
-    for key, label in [
-        (data.code_zip_key, "code.zip"),
-        (data.report_md_key, "report.md"),
-        (data.trace_zip_key, "trace.zip"),
-    ]:
-        if not oss_service.object_exists(key):
-            raise HTTPException(400, f"{label} not found in OSS at key: {key}")
-
-    # Verify datasets exist in DB
-    for did in data.dataset_ids:
-        d = db.query(Dataset).filter(Dataset.id == did).first()
-        if not d:
-            raise HTTPException(400, f"Dataset {did} not found")
-
-    # Update version record
-    v.code_zip_key = data.code_zip_key
-    v.report_md_key = data.report_md_key
-    v.trace_zip_key = data.trace_zip_key
-    v.runtime_key = data.runtime_key
+    # Store original zip key and update status
+    v.arm_zip_key = data.arm_zip_key
     v.status = "processing"
-
-    # Link datasets
-    for did in data.dataset_ids:
-        d = db.query(Dataset).filter(Dataset.id == did).first()
-        if d and d not in v.datasets:
-            v.datasets.append(d)
-
     db.commit()
 
-    # Extract code.zip → extracted/ + manifest.json
+    # Extract arm.zip → validate structure, extract all modules
     try:
-        manifest = oss_service.extract_code_zip(data.code_zip_key, v.storage_prefix)
-        v.code_manifest_key = f"{v.storage_prefix}/code/manifest.json"
+        result = oss_service.extract_arm_zip(data.arm_zip_key, v.storage_prefix)
+        v.code_zip_key = result["code_zip_key"]
+        v.code_manifest_key = result["code_manifest_key"]
+        v.report_md_key = result["report_md_key"]
+        v.trace_zip_key = result["trace_zip_key"]
         v.status = "ready"
-        logger.info("ARM version %s: extracted %d files, manifest generated", v.id, manifest["total_files"])
+        logger.info(
+            "ARM version %s: extracted %d code files, manifest generated",
+            v.id, result["manifest"]["total_files"],
+        )
     except ValueError as e:
         v.status = "failed"
         v.error_message = str(e)

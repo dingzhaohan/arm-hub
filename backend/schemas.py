@@ -102,6 +102,7 @@ class ARMVersionOut(BaseModel):
     version: str
     status: str
     storage_prefix: Optional[str] = None
+    arm_zip_key: Optional[str] = None
     code_zip_key: Optional[str] = None
     code_manifest_key: Optional[str] = None
     report_md_key: Optional[str] = None
@@ -121,7 +122,7 @@ class ARMVersionOut(BaseModel):
 
 
 class UploadCredentialIn(BaseModel):
-    module: str = Field(..., pattern=r"^(code|report|trace|runtime|dataset)$")
+    module: str = Field(..., pattern=r"^(arm|code|report|trace|runtime|dataset)$")
     filename: str = Field(..., min_length=1, max_length=200)
 
 
@@ -137,11 +138,7 @@ class UploadCredentialOut(BaseModel):
 
 
 class ModuleCompleteIn(BaseModel):
-    code_zip_key: Optional[str] = None
-    report_md_key: Optional[str] = None
-    trace_zip_key: Optional[str] = None
-    runtime_key: Optional[str] = None
-    dataset_ids: List[int] = []
+    arm_zip_key: str
 
 
 # ─── ARM Content ───────────────────────────────────────────

@@ -145,6 +145,203 @@ def list_objects(prefix: str, delimiter: str = "/", max_keys: int = 1000) -> dic
 MAX_EXTRACT_FILES = 5000
 MAX_EXTRACT_TOTAL_SIZE = 500 * 1024 * 1024  # 500MB
 
+# Required top-level folders in ARM zip (case-insensitive)
+REQUIRED_ARM_FOLDERS = {"code", "report", "dataset", "trace"}
+
+
+def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
+    """Download arm.zip from OSS, validate 4-folder structure, extract all modules.
+
+    Expected structure:
+        Code/       (must contain README.md)
+        Report/     (must contain exactly one .md file)
+        Dataset/    (can be empty)
+        Trace/      (can be empty)
+
+    Extracts:
+        Code/  -> {storage_prefix}/code/extracted/ + manifest.json
+        Report/ .md -> {storage_prefix}/report/report.md
+        Dataset/ -> {storage_prefix}/dataset/
+        Trace/  -> {storage_prefix}/trace/
+
+    Returns dict with manifest and all module OSS keys.
+    Raises ValueError on validation failure.
+    """
+    bucket = get_bucket()
+
+    # Download zip
+    zip_bytes = bucket.get_object(arm_zip_key).read()
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        # ── Pass 1: validate structure ──────────────────────────
+        top_folders = set()
+        # Map normalized folder name -> actual prefix used in zip
+        folder_prefix_map = {}
+        code_has_readme = False
+        report_md_files = []
+        total_size = 0
+        file_count = 0
+
+        for info in zf.infolist():
+            # Security: ZipSlip prevention
+            if ".." in info.filename or info.filename.startswith("/"):
+                raise ValueError(f"Unsafe path in zip: {info.filename}")
+            # Skip symlinks
+            if info.external_attr >> 16 & 0o120000 == 0o120000:
+                continue
+
+            # Determine top-level folder
+            parts = info.filename.split("/")
+            if len(parts) < 2 or not parts[0]:
+                # Files at root level (not inside any folder) — skip dirs like ""
+                if not info.is_dir():
+                    raise ValueError(f"File at root level not allowed: {info.filename}. All files must be inside Code/, Report/, Dataset/, or Trace/.")
+                continue
+
+            top_raw = parts[0]
+            top_norm = top_raw.lower()
+            top_folders.add(top_norm)
+            if top_norm not in folder_prefix_map:
+                folder_prefix_map[top_norm] = top_raw
+
+            if info.is_dir():
+                continue
+
+            file_count += 1
+            if file_count > MAX_EXTRACT_FILES:
+                raise ValueError(f"Zip contains too many files (>{MAX_EXTRACT_FILES})")
+            total_size += info.file_size
+            if total_size > MAX_EXTRACT_TOTAL_SIZE:
+                raise ValueError(f"Zip total size exceeds limit ({MAX_EXTRACT_TOTAL_SIZE // 1024 // 1024}MB)")
+
+            # Check Code/README.md (case-insensitive)
+            if top_norm == "code":
+                basename = parts[-1].lower()
+                if basename == "readme.md" and len(parts) == 2:
+                    code_has_readme = True
+
+            # Collect Report/*.md files (top-level of Report/ only)
+            if top_norm == "report" and len(parts) == 2:
+                if parts[-1].lower().endswith(".md"):
+                    report_md_files.append(info.filename)
+
+        # Validate: exactly the 4 required folders, no extras
+        extra_folders = top_folders - REQUIRED_ARM_FOLDERS
+        if extra_folders:
+            raise ValueError(f"Unexpected top-level folders: {', '.join(sorted(extra_folders))}. Only Code/, Report/, Dataset/, Trace/ are allowed.")
+        missing_folders = REQUIRED_ARM_FOLDERS - top_folders
+        if missing_folders:
+            raise ValueError(f"Missing required top-level folders: {', '.join(sorted(missing_folders))}")
+
+        if not code_has_readme:
+            raise ValueError("Code/ folder must contain README.md at the top level")
+
+        if len(report_md_files) != 1:
+            raise ValueError(f"Report/ folder must contain exactly one .md file, found {len(report_md_files)}")
+
+        # ── Pass 2: extract files ──────────────────────────────
+        code_files_list = []
+        code_total_size = 0
+        code_file_count = 0
+        report_md_key = None
+        code_zip_buffer = io.BytesIO()
+        code_zip_out = zipfile.ZipFile(code_zip_buffer, "w", zipfile.ZIP_DEFLATED)
+
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            if ".." in info.filename or info.filename.startswith("/"):
+                continue
+            if info.external_attr >> 16 & 0o120000 == 0o120000:
+                continue
+
+            parts = info.filename.split("/")
+            if len(parts) < 2 or not parts[0]:
+                continue
+
+            top_norm = parts[0].lower()
+            # Relative path inside the folder (e.g. "src/main.py")
+            rel_path = "/".join(parts[1:])
+            if not rel_path:
+                continue
+
+            data = zf.read(info.filename)
+
+            if top_norm == "code":
+                # Extract to code/extracted/
+                extracted_key = f"{storage_prefix}/code/extracted/{rel_path}"
+                bucket.put_object(extracted_key, data)
+
+                # Also add to code.zip we're re-creating
+                code_zip_out.writestr(rel_path, data)
+
+                code_file_count += 1
+                code_total_size += info.file_size
+
+                ext = ("." + rel_path.rsplit(".", 1)[-1]).lower() if "." in rel_path else ""
+                is_text = ext in TEXT_EXTENSIONS
+                lang = LANG_MAP.get(ext, None)
+                code_files_list.append({
+                    "path": rel_path,
+                    "size": info.file_size,
+                    "is_text": is_text,
+                    "lang": lang,
+                })
+
+            elif top_norm == "report":
+                # Upload the single .md as report.md
+                report_md_key = f"{storage_prefix}/report/report.md"
+                bucket.put_object(report_md_key, data)
+
+            elif top_norm == "dataset":
+                dataset_key = f"{storage_prefix}/dataset/{rel_path}"
+                bucket.put_object(dataset_key, data)
+
+            elif top_norm == "trace":
+                trace_key = f"{storage_prefix}/trace/{rel_path}"
+                bucket.put_object(trace_key, data)
+
+        # Finalize and upload code.zip
+        code_zip_out.close()
+        code_zip_key = f"{storage_prefix}/code/code.zip"
+        bucket.put_object(code_zip_key, code_zip_buffer.getvalue())
+
+        # Upload trace.zip (re-package trace folder contents)
+        trace_zip_buffer = io.BytesIO()
+        trace_zip_out = zipfile.ZipFile(trace_zip_buffer, "w", zipfile.ZIP_DEFLATED)
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            parts = info.filename.split("/")
+            if len(parts) < 2 or not parts[0]:
+                continue
+            if parts[0].lower() == "trace":
+                rel_path = "/".join(parts[1:])
+                if rel_path:
+                    trace_zip_out.writestr(rel_path, zf.read(info.filename))
+        trace_zip_out.close()
+        trace_zip_key = f"{storage_prefix}/trace/trace.zip"
+        bucket.put_object(trace_zip_key, trace_zip_buffer.getvalue())
+
+    # Build code manifest
+    manifest = {
+        "root": "",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_files": code_file_count,
+        "total_size": code_total_size,
+        "files": code_files_list,
+    }
+    manifest_key = f"{storage_prefix}/code/manifest.json"
+    bucket.put_object(manifest_key, json.dumps(manifest, ensure_ascii=False, indent=2).encode())
+
+    return {
+        "manifest": manifest,
+        "code_zip_key": code_zip_key,
+        "code_manifest_key": manifest_key,
+        "report_md_key": report_md_key,
+        "trace_zip_key": trace_zip_key,
+    }
+
 
 def extract_code_zip(code_zip_key: str, storage_prefix: str) -> dict:
     """Download code.zip from OSS, extract to extracted/, generate manifest.json.

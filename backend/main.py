@@ -22,6 +22,17 @@ try:
 except Exception:
     pass
 
+# Migrate: add arm_zip_key column if missing
+try:
+    from sqlalchemy import text, inspect
+    insp = inspect(engine)
+    cols = [c["name"] for c in insp.get_columns("arm_versions")]
+    if "arm_zip_key" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE arm_versions ADD COLUMN arm_zip_key VARCHAR(500) NULL"))
+except Exception:
+    pass
+
 app = FastAPI(title="ARM Hub", version="1.0.0")
 
 

@@ -94,7 +94,10 @@ class ARMVersion(Base):
     status = Column(String(20), default="draft")  # draft/uploading/processing/ready/failed
     storage_prefix = Column(String(500), nullable=True)
 
-    # Four modules
+    # Single ARM zip (new flow)
+    arm_zip_key = Column(String(500), nullable=True)
+
+    # Four modules (auto-filled from arm.zip extraction, or legacy direct upload)
     code_zip_key = Column(String(500), nullable=True)
     code_manifest_key = Column(String(500), nullable=True)
     report_md_key = Column(String(500), nullable=True)

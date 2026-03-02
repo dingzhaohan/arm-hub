@@ -7,10 +7,7 @@ import { useAuth } from '../contexts/AuthContext'
 const STEPS = [
   { key: 'paper', label: 'Select Paper' },
   { key: 'series', label: 'Create Series & Version' },
-  { key: 'code', label: 'Upload Code' },
-  { key: 'report', label: 'Upload Report' },
-  { key: 'trace', label: 'Upload Trace' },
-  { key: 'dataset', label: 'Select Datasets' },
+  { key: 'upload', label: 'Upload ARM Zip' },
   { key: 'submit', label: 'Submit' },
 ]
 
@@ -24,8 +21,7 @@ export default function ArmUploadWizard() {
   const [paper, setPaper] = useState(null)
   const [series, setSeries] = useState(null)
   const [version, setVersion] = useState(null)
-  const [uploads, setUploads] = useState({ code: null, report: null, trace: null })
-  const [datasetIds, setDatasetIds] = useState([])
+  const [armZipKey, setArmZipKey] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -121,15 +117,11 @@ export default function ArmUploadWizard() {
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
         {step === 0 && <StepSelectPaper paper={paper} setPaper={setPaper} onNext={() => setStep(1)} setError={setError} />}
         {step === 1 && <StepCreateSeries paper={paper} series={series} setSeries={setSeries} version={version} setVersion={setVersion} onNext={() => setStep(2)} setError={setError} />}
-        {step === 2 && <StepUploadFile label="Code" accept=".zip" module="code" filename="code.zip" version={version} uploads={uploads} setUploads={setUploads} onNext={() => setStep(3)} setError={setError} />}
-        {step === 3 && <StepUploadFile label="Report" accept=".md" module="report" filename="report.md" version={version} uploads={uploads} setUploads={setUploads} onNext={() => setStep(4)} setError={setError} />}
-        {step === 4 && <StepUploadFile label="Trace" accept=".zip" module="trace" filename="trace.zip" version={version} uploads={uploads} setUploads={setUploads} onNext={() => setStep(5)} setError={setError} />}
-        {step === 5 && <StepSelectDatasets datasetIds={datasetIds} setDatasetIds={setDatasetIds} onNext={() => setStep(6)} setError={setError} />}
-        {step === 6 && (
+        {step === 2 && <StepUploadArmZip version={version} armZipKey={armZipKey} setArmZipKey={setArmZipKey} onNext={() => setStep(3)} setError={setError} />}
+        {step === 3 && (
           <StepSubmit
             version={version}
-            uploads={uploads}
-            datasetIds={datasetIds}
+            armZipKey={armZipKey}
             submitting={submitting}
             onSubmit={handleSubmit}
           />
@@ -137,7 +129,7 @@ export default function ArmUploadWizard() {
       </div>
 
       {/* Back button */}
-      {step > 0 && step < 6 && !submitting && (
+      {step > 0 && step < 3 && !submitting && (
         <button onClick={() => setStep(s => s - 1)} className="mt-4 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
           Back to previous step
         </button>
@@ -150,10 +142,7 @@ export default function ArmUploadWizard() {
     setSubmitting(true)
     try {
       const res = await api.completeArmVersion(version.id, {
-        code_zip_key: uploads.code,
-        report_md_key: uploads.report,
-        trace_zip_key: uploads.trace,
-        dataset_ids: datasetIds,
+        arm_zip_key: armZipKey,
       })
       setResult(res)
     } catch (e) {
@@ -316,7 +305,7 @@ function StepCreateSeries({ paper, series, setSeries, version, setVersion, onNex
           <p className="text-sm text-gray-700 dark:text-gray-300">Version: <strong>{version.version}</strong></p>
         </div>
         <button onClick={onNext} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-          Next: Upload Code
+          Next: Upload ARM Zip
         </button>
       </div>
     )
@@ -413,28 +402,24 @@ function StepCreateSeries({ paper, series, setSeries, version, setVersion, onNex
   )
 }
 
-// Step 3/4/5: Upload File
-function StepUploadFile({ label, accept, module, filename, version, uploads, setUploads, onNext, setError }) {
+// Step 3: Upload ARM Zip
+function StepUploadArmZip({ version, armZipKey, setArmZipKey, onNext, setError }) {
   const [file, setFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
 
-  const isUploaded = uploads[module] != null
-
   async function handleUpload() {
-    if (!file) { setError(`Please select a ${label} file`); return }
+    if (!file) { setError('Please select a .zip file'); return }
     setError('')
     setUploading(true)
     setProgress(0)
 
     try {
-      // Step 1: Get STS token from backend
       const cred = await api.getUploadCredential(version.id, {
-        module,
-        filename,
+        module: 'arm',
+        filename: 'arm.zip',
       })
 
-      // Step 2: Upload via ali-oss SDK with STS credentials
       const client = new OSS({
         region: `oss-${cred.region}`,
         accessKeyId: cred.access_key_id,
@@ -449,8 +434,7 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
         },
       })
 
-      // Step 3: Record the object key
-      setUploads(prev => ({ ...prev, [module]: cred.object_key }))
+      setArmZipKey(cred.object_key)
       setProgress(100)
     } catch (e) {
       setError(e.message || 'Upload failed')
@@ -461,23 +445,29 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
 
   return (
     <div>
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Upload {label}</h3>
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Upload ARM Package</h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        {module === 'code' && 'Upload your code as a ZIP file. Must contain README.md in root.'}
-        {module === 'report' && 'Upload your reproduction report as a Markdown file.'}
-        {module === 'trace' && 'Upload your execution trace as a ZIP file. This is required.'}
+        Upload a single .zip file containing your ARM. The zip must have exactly 4 top-level folders:
       </p>
 
-      {isUploaded ? (
+      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4 font-mono text-sm text-gray-700 dark:text-gray-300">
+        <div>arm.zip</div>
+        <div className="ml-4">Code/ <span className="text-gray-400">(must contain README.md)</span></div>
+        <div className="ml-4">Report/ <span className="text-gray-400">(must contain exactly one .md file)</span></div>
+        <div className="ml-4">Dataset/ <span className="text-gray-400">(can be empty)</span></div>
+        <div className="ml-4">Trace/ <span className="text-gray-400">(can be empty)</span></div>
+      </div>
+
+      {armZipKey ? (
         <div className="mb-4">
           <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-4">
             <svg className="w-5 h-5 text-emerald-600 dark:text-emerald-400" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
             </svg>
-            <span className="text-sm text-emerald-700 dark:text-emerald-300">{label} uploaded successfully</span>
+            <span className="text-sm text-emerald-700 dark:text-emerald-300">ARM zip uploaded successfully</span>
           </div>
           <button onClick={onNext} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
-            Next
+            Next: Review & Submit
           </button>
         </div>
       ) : (
@@ -485,17 +475,17 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
           <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center">
             <input
               type="file"
-              accept={accept}
+              accept=".zip"
               onChange={e => setFile(e.target.files?.[0] || null)}
               className="hidden"
-              id={`file-${module}`}
+              id="file-arm"
             />
-            <label htmlFor={`file-${module}`} className="cursor-pointer">
+            <label htmlFor="file-arm" className="cursor-pointer">
               <svg className="w-10 h-10 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                {file ? file.name : `Click to select ${filename}`}
+                {file ? file.name : 'Click to select arm.zip'}
               </p>
               {file && <p className="text-xs text-gray-400 mt-1">{formatSize(file.size)}</p>}
             </label>
@@ -515,7 +505,7 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
             disabled={!file || uploading}
             className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
           >
-            {uploading ? `Uploading ${progress}%...` : `Upload ${label}`}
+            {uploading ? `Uploading ${progress}%...` : 'Upload ARM Zip'}
           </button>
         </>
       )}
@@ -523,119 +513,23 @@ function StepUploadFile({ label, accept, module, filename, version, uploads, set
   )
 }
 
-// Step 6: Select Datasets
-function StepSelectDatasets({ datasetIds, setDatasetIds, onNext, setError }) {
-  const [datasets, setDatasets] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-
-  useEffect(() => {
-    api.getDatasets({ limit: 100 })
-      .then(data => setDatasets(data.items || []))
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
-
-  function toggleDataset(id) {
-    setDatasetIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }
-
-  const filtered = search
-    ? datasets.filter(d => d.name.toLowerCase().includes(search.toLowerCase()))
-    : datasets
-
-  return (
-    <div>
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Select Datasets</h3>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        At least one dataset is required. Select existing datasets to link to this ARM version.
-      </p>
-
-      <input
-        type="text"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Filter datasets..."
-        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white mb-3"
-      />
-
-      {loading ? (
-        <div className="flex justify-center py-6"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600" /></div>
-      ) : filtered.length === 0 ? (
-        <p className="text-sm text-gray-500 py-4 text-center">
-          No datasets found. <Link to="/datasets" className="text-indigo-600 hover:underline">Create a dataset first</Link>.
-        </p>
-      ) : (
-        <div className="max-h-60 overflow-y-auto space-y-1 mb-4">
-          {filtered.map(d => (
-            <button
-              key={d.id}
-              onClick={() => toggleDataset(d.id)}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-                datasetIds.includes(d.id)
-                  ? 'bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-300 dark:border-indigo-700'
-                  : 'bg-gray-50 dark:bg-gray-800 border border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'
-              }`}
-            >
-              <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
-                datasetIds.includes(d.id)
-                  ? 'bg-indigo-600 border-indigo-600'
-                  : 'border-gray-300 dark:border-gray-600'
-              }`}>
-                {datasetIds.includes(d.id) && (
-                  <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd"/>
-                  </svg>
-                )}
-              </div>
-              <span className="text-gray-900 dark:text-white">{d.name}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-gray-500">{datasetIds.length} selected</span>
-        <button
-          onClick={() => {
-            if (datasetIds.length === 0) { setError('At least one dataset is required'); return }
-            setError('')
-            onNext()
-          }}
-          disabled={datasetIds.length === 0}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
-        >
-          Next: Review & Submit
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// Step 7: Submit
-function StepSubmit({ version, uploads, datasetIds, submitting, onSubmit }) {
-  const allReady = uploads.code && uploads.report && uploads.trace && datasetIds.length > 0
-
+// Step 4: Submit
+function StepSubmit({ version, armZipKey, submitting, onSubmit }) {
   return (
     <div>
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Review & Submit</h3>
 
       <div className="space-y-3 mb-6">
-        <CheckItem label="Code (code.zip)" done={!!uploads.code} />
-        <CheckItem label="Report (report.md)" done={!!uploads.report} />
-        <CheckItem label="Trace (trace.zip)" done={!!uploads.trace} />
-        <CheckItem label={`Datasets (${datasetIds.length} selected)`} done={datasetIds.length > 0} />
+        <CheckItem label="ARM zip uploaded" done={!!armZipKey} />
       </div>
 
-      {!allReady && (
-        <p className="text-sm text-red-500 mb-4">All four modules are required before submission.</p>
-      )}
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        The server will validate and extract your zip into Code, Report, Dataset, and Trace modules.
+      </p>
 
       <button
         onClick={onSubmit}
-        disabled={!allReady || submitting}
+        disabled={!armZipKey || submitting}
         className="w-full px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50"
       >
         {submitting ? 'Submitting & Processing...' : 'Submit ARM Version'}
@@ -643,7 +537,7 @@ function StepSubmit({ version, uploads, datasetIds, submitting, onSubmit }) {
 
       {submitting && (
         <p className="text-xs text-gray-500 text-center mt-2">
-          This may take a moment as code.zip is being extracted and validated...
+          This may take a moment as the zip is being validated and extracted...
         </p>
       )}
     </div>
