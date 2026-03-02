@@ -1,5 +1,8 @@
 """BohrClaw provisioner — create a Bohrium node, wait for readiness,
 remote-start OpenClaw, and return the Web UI URL.
+
+All openapi calls use the platform-level access key (BOHRIUM_OPENPLATFORM_AK)
+and the base URL from config (BOHRIUM_OPENPLATFORM_API).
 """
 
 import json
@@ -9,10 +12,9 @@ import time
 import urllib.request
 import urllib.error
 
-logger = logging.getLogger(__name__)
+from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK
 
-# Bohrium Open API base
-BOHRIUM_OPEN_API = "https://openapi.dp.tech/openapi/v1"
+logger = logging.getLogger(__name__)
 
 # Chatbohr LLM provision endpoint
 LLM_PROVISION_URL = "https://chatbohr.dp.tech/api/v1/llm/provision"
@@ -50,6 +52,19 @@ _SKU_MAP = {
 DEFAULT_SKU_ID = 388  # c2_m4_cpu
 
 
+def _openapi_base() -> str:
+    """Return the openapi base URL (e.g. https://openapi.dp.tech/openapi/v1)."""
+    base = BOHRIUM_OPENPLATFORM_API.rstrip("/")
+    return f"{base}/openapi/v1"
+
+
+def _platform_ak() -> str:
+    """Return the platform-level access key."""
+    if not BOHRIUM_OPENPLATFORM_AK:
+        raise RuntimeError("BOHRIUM_OPENPLATFORM_AK not configured")
+    return BOHRIUM_OPENPLATFORM_AK
+
+
 def _api_request(url: str, *, method: str = "GET", headers: dict = None,
                  data: dict = None, timeout: int = 30) -> dict:
     """Make an HTTP request, return parsed JSON body."""
@@ -73,7 +88,7 @@ def get_user_project_id(access_key: str) -> int:
     Raises RuntimeError if no projects found.
     """
     resp = _api_request(
-        f"{BOHRIUM_OPEN_API}/project/list",
+        f"{_openapi_base()}/project/list",
         headers={"accessKey": access_key},
     )
     items = resp.get("data", {}).get("items") or []
@@ -118,7 +133,7 @@ def create_node(access_key: str, project_id: str, *,
     """Create a Bohrium node and return its node ID."""
     sku_id = _SKU_MAP.get(machine_type, DEFAULT_SKU_ID)
     resp = _api_request(
-        f"{BOHRIUM_OPEN_API}/node/add",
+        f"{_openapi_base()}/node/add",
         method="POST",
         headers={"accessKey": access_key},
         data={
@@ -153,7 +168,7 @@ def wait_for_node(access_key: str, node_id: int,
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
         resp = _api_request(
-            f"{BOHRIUM_OPEN_API}/node/list?queryType=private",
+            f"{_openapi_base()}/node/list?queryType=private",
             headers={"accessKey": access_key},
         )
         for item in (resp.get("data", {}).get("items") or []):
