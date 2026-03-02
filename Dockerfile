@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npx vite build --mode ${BUILD_MODE}
 
 # Stage 2: Runtime
-FROM registry.dp.tech/base/python3.11 
+FROM registry.dp.tech/base/python3.11
 
 WORKDIR /workspace
 
