@@ -1,0 +1,240 @@
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  RUNNER_ZJK_TAG: k8s-runner-zjk-svc
+  REGION: cn-zhangjiakou
+  REGISTRY: dp-harbor-registry.cn-zhangjiakou.cr.aliyuncs.com
+  DOCKER_TAG: $CI_COMMIT_SHORT_SHA
+  GIT_STRATEGY: clone
+  COVER: "false"
+  CHECK: main
+
+
+include:
+  - local: ".deploy-ci.yaml"
+
+
+stages:
+  - code check
+  - build
+  - deploy-test
+  - manual-uat
+  - deploy-uat
+  - check
+  - manual-online
+
+
+image: $REGISTRY/public/ubuntu:gitlab-0.0.2
+services:
+  - $REGISTRY/public/docker:20.10.16-dind
+
+.curl: &curl
+         >-
+         /busybox/curl --retry 3 --retry-delay 10 -s -X POST -H "Content-Type: application/json" -H "X-Gitlab-Token: ${secret}"  --data-binary """{
+         \"image\":\"$DOCKER_IMAGE\",
+         \"pipeline_id\":$CI_PIPELINE_ID,
+         \"tag\":\"$CI_COMMIT_TAG\",
+         \"branch\":\"$CI_COMMIT_BRANCH\",
+         \"server_name\":\"$SERVER_NAME\",
+         \"user\":\"$AUTHOR_NAME\",
+         \"commit_id\":\"$CI_COMMIT_SHA\",
+         \"step\":\"$CI_JOB_STAGE\",
+         \"project_id\":$CI_PROJECT_ID,
+         \"build_id\":$CI_JOB_ID,
+         \"step_status\":\"$CI_JOB_STATUS\",
+         \"gitlab_url\":\"$CI_PIPELINE_URL\",
+         \"deploy_name\":\"$CI_JOB_NAME\"}""" ${devops} > result.json
+
+.serviceName: &service_name
+                >-
+                [ -z "$DOCKERFILE_DIR" ] && DOCKERFILE_DIR=$(/busybox/curl --retry 3 --retry-delay 10 -s -X GET -H "Content-Type: application/json" -H "X-Gitlab-Token: ${secret}"  --data-binary """{
+                \"server_name\":\"$SERVER_NAME\"}
+                """ ${devops}) || { echo $DOCKERFILE_DIR; }
+
+
+
+docker-build:
+  variables:
+    DOCKER_HOST: tcp://docker-build-service:32375
+  stage: build
+  image: $REGISTRY/public/ubuntu:gitlab-docker
+  script:
+    - echo $SERVER_NAME
+    - *service_name
+    - echo $DOCKER_IMAGE
+    - |
+      cat > /root/.docker/config.json <<EOF
+      {
+      "auths": {
+        "registry.dp.tech": {
+          "auth": "`echo -n $REGISTRY_USERNAME:$REGISTRY_PASSWORD | base64`"
+        },
+        "dp-harbor-registry.cn-zhangjiakou.cr.aliyuncs.com": {
+          "auth": "`echo -n $REGISTRY_USERNAME:$REGISTRY_PASSWORD | base64`"
+        }
+      }
+      }
+      EOF
+    - >-
+      if [ -z "$CI_COMMIT_TAG" ]; then BUILD_MODE=test; else BUILD_MODE=production; fi
+    - >-
+      docker buildx build --progress=plain  -f ${CI_PROJECT_DIR}/$DOCKERFILE_DIR/Dockerfile -t ${DOCKER_IMAGE} --build-arg BUILD_MODE=${BUILD_MODE} --cache-to type=inline,mode=max . --push
+    - *curl
+  retry: 2
+  tags:
+    - k8s-runner-ack-abroad
+  cache:
+    paths:
+      - /cache
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ $BRANCH || $CI_COMMIT_TAG'
+      changes:
+        - "*"
+        - "**/*"
+
+
+docker-cover-build:
+  stage: build
+  image: $REGISTRY/public/kaniko-project/executor:debug-0.0.5
+  script:
+    - echo "构建cover镜像"
+    - *service_name
+    - |
+      [ $COVER == "true" ] && DOCKER_IMAGE=$REGISTRY/flow/${DOCKER_NAME}:cover-${DOCKER_TAG}
+    - echo $DOCKER_IMAGE
+    - >-
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile=${CI_PROJECT_DIR}/$DOCKERFILE_DIR/Dockerfile-cover
+      --destination=${DOCKER_IMAGE}
+      --build-arg BRANCH=$CI_COMMIT_BRANCH || exit 1
+    - *curl
+  retry: 2
+  tags:
+    - $RUNNER_ZJK_TAG
+  cache:
+    paths:
+      - .docker
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ $BRANCH && $COVER == "true" '
+      changes:
+        - "*"
+        - "**/*"
+
+
+deploy-test:
+  stage: deploy-test
+  tags:
+    - $RUNNER_ZJK_TAG
+  script:
+    - echo 部署test 环境
+    - |
+      [ $COVER == "true" ] && DOCKER_IMAGE=$REGISTRY/flow/${DOCKER_NAME}:cover-${DOCKER_TAG}
+    - echo $DOCKER_IMAGE
+    - *curl
+    - cat result.json
+    - if [[ $(cat result.json | jq '.code') -ne 10000 ]];then exit 1;fi
+  retry: 2
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ $BRANCH  && $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_TAG == null'
+      changes:
+        - "*"
+        - "**/*"
+
+
+manual-uat:
+  stage: manual-uat
+  script:
+    - echo 触发飞书信息测试人员审核
+    - echo $DOCKER_IMAGE
+    - *curl
+    - cat result.json
+    - if [[ $(cat result.json | jq '.code') -ne 10000 ]];then exit 1;fi
+  tags:
+    - $RUNNER_ZJK_TAG
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - "*"
+        - "**/*"
+
+
+deploy-uat:
+  stage: deploy-uat
+  script:
+    - echo 触发运维平台部署uat
+    - echo $DOCKER_IMAGE
+    - *curl
+    - cat result.json
+    - if [[ $(cat result.json | jq '.code') -ne 10000 ]];then exit 1;fi
+  tags:
+    - $RUNNER_ZJK_TAG
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - "*"
+        - "**/*"
+      when: manual
+
+check-branch:
+  stage: check
+  script:
+    - |
+      git fetch origin $CHECK
+      CURRENT_COMMIT=$(git rev-parse HEAD)
+      MASTER_COMMIT=$(git rev-parse origin/$CHECK)
+      echo "Current commit: $CURRENT_COMMIT"
+      echo "Master commit: $MASTER_COMMIT"
+      if git merge-base --is-ancestor $CURRENT_COMMIT $MASTER_COMMIT; then
+          echo -e "\\033[42mCurrent commit is merged into  $CHECK\\033[0m";
+      else
+          echo  -e "\\033[31mCurrent commit is not merged into  $CHECK\\033[0m";
+          exit 1;
+      fi
+      if git merge-base --is-ancestor $MASTER_COMMIT $CURRENT_COMMIT; then
+          echo -e "\\033[42mCurrent commit contains the latest  $CHECK commit\\033[0m";
+      else
+          echo -e "\\033[31mCurrent commit does not contain the latest  $CHECK commit\\033[0m";
+          exit 1;
+      fi
+  tags:
+    - $RUNNER_ZJK_TAG
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - "*"
+        - "**/*"
+  needs:
+    - deploy-uat
+
+manual-online:
+  stage: manual-online
+  script:
+    - echo 触发飞书审批,运维通过后人工部署生产环境
+    - echo $DOCKER_IMAGE
+    - *curl
+    - cat result.json
+    - if [[ $(cat result.json | jq '.code') -ne 10000 ]];then exit 1;fi
+  tags:
+    - $RUNNER_ZJK_TAG
+  needs:
+    - check-branch
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      changes:
+        - "*"
+        - "**/*"
+      when: manual
+
+
+
+before_script:
+  - |
+    COMMIT_TAG=`echo $CI_COMMIT_TAG | awk -F '_' '{print $3}'`
+    DOCKER_TAG=$CI_PIPELINE_ID$COMMIT_TAG
+    [ -z "$CI_COMMIT_TAG" ] && SERVER_NAME=$PROJECT_NAME || SERVER_NAME=$(echo $CI_COMMIT_TAG | awk -F '_' '{print $2}')
+    [ -z "$CI_COMMIT_TAG" ] && DOCKER_NAME=$(echo $PROJECT_NAME | awk -F '_' '{print $1}' ) || DOCKER_NAME=$(echo $CI_COMMIT_TAG | awk -F '_' '{print $2}')
+  - DOCKER_IMAGE=$REGISTRY/flow/${DOCKER_NAME}:${DOCKER_TAG}
+  - AUTHOR_NAME=$(git log -1 --pretty=format:"%an" --no-merges)
+
+

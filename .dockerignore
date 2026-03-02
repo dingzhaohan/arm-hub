@@ -1,0 +1,45 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/.venv/
+.env
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+*.swp
+
+# Claude
+.claude/
+
+# Logs & temp
+*.log
+tmp/
+
+# SQLite (dev)
+*.db
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# CI
+.gitlab-ci.yml
+.deplot-ci.yaml
+.deploy-ci.yaml
+
+# Scripts (dev only)
+start.sh
