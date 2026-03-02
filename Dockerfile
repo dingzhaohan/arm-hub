@@ -1,7 +1,7 @@
 # Stage 1: Frontend build
 FROM registry.dp.tech/public/node:22 AS frontend
 
-ARG BUILD_MODE=production
+ARG BUILD_MODE=test
 
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
