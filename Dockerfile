@@ -12,7 +12,7 @@ RUN npx vite build --mode ${BUILD_MODE}
 # Stage 2: Runtime
 FROM registry.dp.tech/base/python3.11
 
-WORKDIR /workspace
+WORKDIR /workspace 
 
 # Conda
 RUN wget -q https://dp-filetrans-zjk.oss-cn-zhangjiakou.aliyuncs.com/software/miniforge/Mambaforge-22.9.0-0-Linux-x86_64.sh && \
