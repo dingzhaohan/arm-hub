@@ -1,0 +1,4 @@
+variables:
+  PROJECT_NAME: dp-paper2arm-hub_test
+  BRANCH: dev
+  DOCKERFILE_DIR: ./
