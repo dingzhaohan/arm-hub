@@ -210,6 +210,22 @@ class UserFollowSkill(Base):
 
 # ─── Score Tables (reserved) ────────────────────────────────
 
+# ─── BohrClaw Instances ─────────────────────────────────────
+
+class BohrClawInstance(Base):
+    __tablename__ = "bohrclaw_instances"
+    id = Column(Integer, primary_key=True, index=True)
+    bohrium_user_id = Column(Integer, unique=True, nullable=False, index=True)
+    status = Column(String(20), default="provisioning")  # provisioning/ready/failed/stopped
+    instance_url = Column(String(500), nullable=True)
+    node_id = Column(String(50), nullable=True)
+    node_ip = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+# ─── Score Tables (reserved) ────────────────────────────────
+
 class ARMScoreJob(Base):
     __tablename__ = "arm_score_jobs"
     id = Column(Integer, primary_key=True, index=True)

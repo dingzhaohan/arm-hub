@@ -12,6 +12,7 @@ import DatasetDetail from './pages/DatasetDetail'
 import Skills from './pages/Skills'
 import SkillDetail from './pages/SkillDetail'
 import Profile from './pages/Profile'
+import BohrClaw from './pages/BohrClaw'
 import NotFound from './pages/NotFound'
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/skills" element={<Skills />} />
         <Route path="/skills/:id" element={<SkillDetail />} />
         <Route path="/profile" element={<Profile />} />
+        <Route path="/playground" element={<BohrClaw />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

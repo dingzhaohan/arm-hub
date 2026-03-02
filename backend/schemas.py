@@ -288,6 +288,21 @@ class ScoreCallbackIn(BaseModel):
     report_md_key: Optional[str] = None
 
 
+# ─── BohrClaw ─────────────────────────────────────────────
+
+class BohrClawStatusOut(BaseModel):
+    id: int
+    bohrium_user_id: int
+    status: str
+    instance_url: Optional[str] = None
+    node_id: Optional[str] = None
+    node_ip: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
 # ─── Pagination ────────────────────────────────────────────
 
 class PaginatedResponse(BaseModel):

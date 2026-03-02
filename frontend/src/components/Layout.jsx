@@ -10,6 +10,7 @@ const navItems = [
   { to: '/arms', label: 'ARMs' },
   { to: '/datasets', label: 'Datasets' },
   { to: '/skills', label: 'Skills' },
+  { to: '/playground', label: 'BohrClaw' },
 ]
 
 export default function Layout() {

@@ -13,6 +13,7 @@ from app_config import limiter
 
 # Route modules
 from routes import papers, arms, arm_content, datasets, skills, profile, scoring
+from routes import bohrclaw as bohrclaw_routes
 from auth import router as auth_router
 from bohrium_auth import router as bohrium_auth_router
 
@@ -65,6 +66,7 @@ app.include_router(datasets.router)
 app.include_router(skills.router)
 app.include_router(profile.router)
 app.include_router(scoring.router)
+app.include_router(bohrclaw_routes.router)
 
 # ─── SPA Fallback ─────────────────────────────────────────
 STATIC_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"

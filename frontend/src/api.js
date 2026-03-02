@@ -109,4 +109,8 @@ export const api = {
   // Score
   requestScore: (versionId) => request(`/arm-versions/${versionId}/score/request`, { method: 'POST' }),
   getScore: (versionId) => request(`/arm-versions/${versionId}/score`),
+
+  // BohrClaw
+  getBohrClawStatus: () => request('/bohrclaw/status'),
+  launchBohrClaw: () => request('/bohrclaw/launch', { method: 'POST' }),
 }
