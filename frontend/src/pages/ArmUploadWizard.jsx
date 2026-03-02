@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
-import OSS from 'ali-oss'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
+import { ossUpload, validateFile, formatSize } from '../utils/ossUpload'
 
 const STEPS = [
   { key: 'paper', label: 'Select Paper' },
@@ -410,6 +410,11 @@ function StepUploadArmZip({ version, armZipKey, setArmZipKey, onNext, setError }
 
   async function handleUpload() {
     if (!file) { setError('Please select a .zip file'); return }
+
+    // Validate file
+    const fileErr = validateFile(file, { allowedExts: ['.zip'] })
+    if (fileErr) { setError(fileErr); return }
+
     setError('')
     setUploading(true)
     setProgress(0)
@@ -420,18 +425,8 @@ function StepUploadArmZip({ version, armZipKey, setArmZipKey, onNext, setError }
         filename: 'arm.zip',
       })
 
-      const client = new OSS({
-        region: `oss-${cred.region}`,
-        accessKeyId: cred.access_key_id,
-        accessKeySecret: cred.access_key_secret,
-        stsToken: cred.security_token,
-        bucket: cred.bucket,
-      })
-
-      await client.put(cred.object_key, file, {
-        progress: (p) => {
-          setProgress(Math.round(p * 100))
-        },
+      await ossUpload(cred, file, {
+        onProgress: (pct) => setProgress(pct),
       })
 
       setArmZipKey(cred.object_key)
@@ -559,11 +554,4 @@ function CheckItem({ label, done }) {
       <span className={`text-sm ${done ? 'text-gray-900 dark:text-white' : 'text-gray-400'}`}>{label}</span>
     </div>
   )
-}
-
-function formatSize(bytes) {
-  if (!bytes) return '0 B'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }

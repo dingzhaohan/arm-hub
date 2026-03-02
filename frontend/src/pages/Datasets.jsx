@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import OSS from 'ali-oss'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
+import { ossUpload, validateFile, formatSize } from '../utils/ossUpload'
 
 export default function Datasets() {
   const { user } = useAuth()
@@ -89,25 +89,17 @@ function CreateDatasetForm({ onClose, onCreated }) {
       const ds = await api.createDataset({ name: name.trim(), description: description.trim() })
 
       if (file) {
-        // Step 2: Get upload credential
+        // Validate file
+        const fileErr = validateFile(file, { allowedExts: ['.zip'] })
+        if (fileErr) { setError(fileErr); setCreating(false); return }
+
+        // Step 2: Get STS credential
         setUploading(true)
         const cred = await api.getDatasetUploadCredential(ds.id)
 
-        // Step 3: Upload file to OSS via ali-oss SDK
-        const safeFile = new File([file], 'dataset.zip', { type: file.type || 'application/zip' })
-        const client = new OSS({
-          region: `oss-${cred.region}`,
-          accessKeyId: cred.access_key_id,
-          accessKeySecret: cred.access_key_secret,
-          stsToken: cred.security_token,
-          bucket: cred.bucket,
-          secure: true,
-        })
-
-        await client.put(cred.object_key, safeFile, {
-          progress: (p) => {
-            setProgress(Math.round(p * 100))
-          },
+        // Step 3: Multipart upload to OSS
+        await ossUpload(cred, file, {
+          onProgress: (pct) => setProgress(pct),
         })
 
         // Step 4: Complete
@@ -144,6 +136,7 @@ function CreateDatasetForm({ onClose, onCreated }) {
           <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">Dataset file (.zip)</label>
           <input type="file" accept=".zip" onChange={e => setFile(e.target.files?.[0] || null)}
             className="text-sm text-gray-500 file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-purple-50 file:text-purple-700 dark:file:bg-purple-900/50 dark:file:text-purple-300" />
+          {file && <p className="text-xs text-gray-400 mt-1">{file.name} ({formatSize(file.size)})</p>}
         </div>
         {uploading && (
           <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
