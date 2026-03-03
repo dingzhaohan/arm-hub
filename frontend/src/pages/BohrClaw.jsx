@@ -128,17 +128,38 @@ export default function BohrClaw() {
     )
   }
 
-  // Instance ready — iframe embed
+  // Instance ready — show link to OpenClaw
   if (instance?.status === 'ready' && instance.instance_url) {
     return (
-      <div className="-mx-4 sm:-mx-6 lg:-mx-8 -my-8" style={{ height: 'calc(100vh - 64px)' }}>
-        <iframe
-          src={instance.instance_url}
-          title="BohrClaw"
-          className="w-full h-full border-0"
-          allow="clipboard-read; clipboard-write"
-          sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
-        />
+      <div className="max-w-xl mx-auto py-16">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">BohrClaw</h1>
+          <p className="text-gray-500 dark:text-gray-400">Your OpenClaw instance is ready!</p>
+        </div>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
+          <div className="p-3 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg text-sm text-green-700 dark:text-green-400 flex items-center gap-2">
+            <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            Instance is running
+          </div>
+          {instance.node_ip && (
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Node: {instance.node_ip} (ID: {instance.node_id})
+            </p>
+          )}
+          <a
+            href={instance.instance_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+          >
+            Open OpenClaw
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        </div>
       </div>
     )
   }

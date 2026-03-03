@@ -211,22 +211,132 @@ def _wait_ssh_ready(ip: str, password: str, retries: int = 15, interval: int = 5
             time.sleep(interval)
 
 
+def _build_remote_script(access_key: str, project_id: str,
+                         domain_name: str, model_id: str) -> str:
+    """Build the remote bash script that configures and starts OpenClaw via supervisor."""
+    return r'''
+ACCESS_KEY="$1"
+PROJECT_ID="$2"
+DOMAIN_NAME="$3"
+MODEL_ENV="$4"
+
+# Write env vars to .bashrc for persistence
+sed -i '/^export ACCESS_KEY=/d' ~/.bashrc 2>/dev/null
+sed -i '/^export PROJECT_ID=/d' ~/.bashrc 2>/dev/null
+safe_val() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+echo "export ACCESS_KEY='$(safe_val "$ACCESS_KEY")'" >> ~/.bashrc
+echo "export PROJECT_ID='$(safe_val "$PROJECT_ID")'" >> ~/.bashrc
+export ACCESS_KEY PROJECT_ID
+
+# 1) Generate config/token only, do NOT launch gateway (supervisor will manage it)
+# Use bash -lc to ensure correct PATH (e.g. /opt/mamba/bin/python)
+bash -lc "env ${MODEL_ENV} OPENCLAW_WEB_UI_HOST='$DOMAIN_NAME' OPENCLAW_API_KEY='$ACCESS_KEY' OPENCLAW_NO_LAUNCH=1 python /root/start.py"
+
+# 2) Install supervisor
+apt-get update -qq && apt-get install -y supervisor >/dev/null 2>&1 || true
+
+OPENCLAW_SUPERVISORD_CONF="/etc/supervisor/openclaw-supervisord.conf"
+cat > "$OPENCLAW_SUPERVISORD_CONF" <<'SDCONF'
+[unix_http_server]
+file=/var/run/openclaw-supervisor.sock
+chmod=0700
+
+[supervisord]
+logfile=/var/log/supervisord.log
+logfile_maxbytes=50MB
+loglevel=info
+pidfile=/var/run/openclaw-supervisord.pid
+nodaemon=false
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///var/run/openclaw-supervisor.sock
+
+[include]
+files = /etc/supervisor/conf.d/*.conf
+SDCONF
+
+# Stop old supervisord if running
+pkill -x supervisord 2>/dev/null || true
+sleep 1
+
+# 3) Clean up old gateway process
+PIDFILE="/root/.openclaw/openclawgateway.pid"
+if [ -f "$PIDFILE" ]; then
+  kill -TERM "$(cat "$PIDFILE")" 2>/dev/null || true
+  sleep 1
+  kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
+  rm -f "$PIDFILE"
+fi
+# Port fallback: force-release 50001 if still occupied
+if ss -ltnp 2>/dev/null | grep -q ":50001"; then
+  fuser -k 50001/tcp 2>/dev/null || true
+fi
+
+# 4) Write openclaw-gateway supervisor program config
+cat >/etc/supervisor/conf.d/openclaw-gateway.conf <<'SUPERVISORCONF'
+[program:openclaw-gateway]
+directory=/root
+command=/bin/bash -lc 'openclaw gateway --help 2>&1 | grep -q -- "--config" && exec openclaw gateway --config /root/.openclaw/openclaw.json || exec openclaw gateway'
+autostart=true
+autorestart=true
+startretries=999
+startsecs=2
+stopsignal=TERM
+stopwaitsecs=10
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/openclaw-gateway.out.log
+stderr_logfile=/var/log/openclaw-gateway.err.log
+SUPERVISORCONF
+
+# 5) Start supervisord (autostart=true will bring up gateway)
+supervisord -c "$OPENCLAW_SUPERVISORD_CONF"
+sleep 3
+supervisorctl -c "$OPENCLAW_SUPERVISORD_CONF" status openclaw-gateway
+STATUS=$(supervisorctl -c "$OPENCLAW_SUPERVISORD_CONF" status openclaw-gateway | awk '{print $2}')
+if [ "$STATUS" != "RUNNING" ]; then
+  echo "WARNING: supervisor process status: $STATUS"
+  echo "Check logs: tail /var/log/openclaw-gateway.err.log"
+fi
+'''
+
+
 def start_openclaw(ip: str, password: str, domain_name: str,
                    access_key: str, project_id: str,
                    model_id: str = DEFAULT_MODEL_ID) -> str:
-    """SSH into the node, set env vars, run start.py, return Web UI URL."""
-    _wait_ssh_ready(ip, password)
+    """SSH into the node via domain, configure env, start OpenClaw via supervisor, return Web UI URL."""
+    ssh_host = domain_name or ip
+    _wait_ssh_ready(ssh_host, password)
 
-    remote_cmd = (
-        f"export ACCESS_KEY='{access_key}' && "
-        f"export PROJECT_ID='{project_id}' && "
-        f"export MODEL_ID='{model_id}' && "
-        f"export OPENCLAW_WEB_UI_HOST='{domain_name}' && "
-        f"export OPENCLAW_API_KEY='{access_key}' && "
-        f"python /root/start.py"
-    )
+    model_env = f"MODEL_ID={model_id}"
+    remote_script = _build_remote_script(access_key, project_id, domain_name, model_id)
 
-    output = _ssh_exec(ip, password, remote_cmd, timeout=120)
+    # Use paramiko to send script via stdin with args, matching the bash approach
+    import paramiko
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(ssh_host, username="root", password=password,
+                   timeout=30, look_for_keys=False, allow_agent=False)
+
+    # Execute: bash -s -- <access_key> <project_id> <domain_name> <model_env>
+    cmd = f"bash -s -- '{access_key}' '{project_id}' '{domain_name}' '{model_env}'"
+    stdin_ch, stdout_ch, stderr_ch = client.exec_command(cmd, timeout=180)
+    stdin_ch.write(remote_script)
+    stdin_ch.channel.shutdown_write()
+
+    output = stdout_ch.read().decode()
+    err_output = stderr_ch.read().decode()
+    exit_code = stdout_ch.channel.recv_exit_status()
+    client.close()
+
+    logger.info("OpenClaw remote output:\n%s", output)
+    if err_output:
+        logger.info("OpenClaw remote stderr:\n%s", err_output)
+    if exit_code != 0:
+        logger.warning("OpenClaw remote script exited with code %s", exit_code)
 
     # Parse URL from output
     url = None
