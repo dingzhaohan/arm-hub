@@ -15,7 +15,7 @@ from schemas import BohrClawStatusOut
 from auth import get_current_user
 from app_config import limiter
 from bohrium_auth import get_user_access_key
-from bohrclaw_provisioner import provision_bohrclaw_with_progress, get_user_project_id
+from bohrclaw_provisioner import provision_bohrclaw_with_progress, get_user_project_id, delete_node
 
 logger = logging.getLogger(__name__)
 
@@ -145,4 +145,31 @@ def launch_bohrclaw(
     )
     t.start()
 
-    return BohrClawStatusOut.model_validate(instance) 
+    return BohrClawStatusOut.model_validate(instance)
+
+
+@router.delete("/destroy")
+@limiter.limit("3/minute")
+def destroy_bohrclaw(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    user = _require_user(user)
+    instance = db.query(BohrClawInstance).filter(
+        BohrClawInstance.bohrium_user_id == user.bohrium_id
+    ).first()
+    if not instance:
+        raise HTTPException(status_code=404, detail="No instance found")
+
+    # Delete the Bohrium node if we have a node_id and user has valid credentials
+    if instance.node_id:
+        try:
+            access_key = get_user_access_key(user.bohrium_id, user.bohrium_org_id)
+            delete_node(access_key, int(instance.node_id))
+        except Exception as e:
+            logger.warning("Failed to delete Bohrium node %s: %s", instance.node_id, e)
+
+    db.delete(instance)
+    db.commit()
+    return {"detail": "Instance destroyed"}

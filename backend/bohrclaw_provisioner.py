@@ -157,6 +157,19 @@ def create_node(access_key: str, project_id: str, *,
 # ---------------------------------------------------------------------------
 # Step 3: Poll until node is ready (status == 2)
 # ---------------------------------------------------------------------------
+def delete_node(access_key: str, node_id: int) -> None:
+    """Delete a Bohrium node by ID."""
+    resp = _api_request(
+        f"{_openapi_base()}/node/delete",
+        method="POST",
+        headers={"accessKey": access_key},
+        data={"ids": [int(node_id)]},
+    )
+    if resp.get("code") != 0:
+        raise RuntimeError(f"Node deletion failed: {resp}")
+    logger.info("Node deleted: %s", node_id)
+
+
 def wait_for_node(access_key: str, node_id: int,
                   timeout_seconds: int = 300, poll_interval: int = 5) -> dict:
     """Poll the node list until the given node reaches status 2 (ready).

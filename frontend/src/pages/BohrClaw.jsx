@@ -54,6 +54,7 @@ export default function BohrClaw() {
   const [instance, setInstance] = useState(null)
   const [loading, setLoading] = useState(true)
   const [launching, setLaunching] = useState(false)
+  const [destroying, setDestroying] = useState(false)
   const [error, setError] = useState(null)
   const pollRef = useRef(null)
 
@@ -100,6 +101,20 @@ export default function BohrClaw() {
     } catch (e) {
       setError(e.message || 'Failed to launch')
       setLaunching(false)
+    }
+  }
+
+  const handleDestroy = async () => {
+    if (!confirm('Are you sure you want to destroy this OpenClaw instance? The Bohrium node will also be deleted.')) return
+    setDestroying(true)
+    setError(null)
+    try {
+      await api.destroyBohrClaw()
+      setInstance(null)
+    } catch (e) {
+      setError(e.message || 'Failed to destroy')
+    } finally {
+      setDestroying(false)
     }
   }
 
@@ -159,6 +174,19 @@ export default function BohrClaw() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
           </a>
+          <button
+            onClick={handleDestroy}
+            disabled={destroying}
+            className="w-full px-6 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {destroying && (
+              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            )}
+            {destroying ? 'Destroying...' : 'Destroy Instance'}
+          </button>
         </div>
       </div>
     )
