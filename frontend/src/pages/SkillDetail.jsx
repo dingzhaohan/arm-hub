@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -7,6 +10,7 @@ export default function SkillDetail() {
   const { id } = useParams()
   const [skill, setSkill] = useState(null)
   const [armVersions, setArmVersions] = useState([])
+  const [readme, setReadme] = useState(null)
   const [loading, setLoading] = useState(true)
   const [followed, setFollowed] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
@@ -25,6 +29,7 @@ export default function SkillDetail() {
   useEffect(() => {
     if (user) {
       api.getFollowSkillStatus(id).then(r => setFollowed(r.followed)).catch(() => {})
+      api.getSkillReadme(id).then(r => { if (r.content) setReadme(r.content) }).catch(() => {})
     }
   }, [id, user])
 
@@ -66,6 +71,18 @@ export default function SkillDetail() {
           </button>
         )}
       </div>
+
+      {/* Readme / Markdown doc */}
+      {readme && (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">README</h2>
+          <div className="prose dark:prose-invert max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              {readme}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
 
       <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Associated ARM Versions ({armVersions.length})</h2>
       {armVersions.length === 0 ? <p className="text-sm text-gray-500">None</p> : (

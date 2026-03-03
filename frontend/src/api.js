@@ -85,6 +85,7 @@ export const api = {
     return request(`/skills${q ? '?' + q : ''}`)
   },
   getSkill: (id) => request(`/skills/${id}`),
+  getSkillReadme: (id) => request(`/skills/${id}/readme`),
   createSkill: (data) => request('/skills', { method: 'POST', body: JSON.stringify(data) }),
   getSkillArmVersions: (id) => request(`/skills/${id}/arm-versions`),
   downloadSkill: (id) => request(`/skills/${id}/download`),

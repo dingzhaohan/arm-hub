@@ -137,6 +137,24 @@ def get_skill(skill_id: int, db: Session = Depends(get_db)):
     return _skill_to_out(skill)
 
 
+@router.get("/{skill_id}/readme")
+def get_skill_readme(
+    skill_id: int,
+    user=Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(404, "Skill not found")
+    if not skill.oss_md_key:
+        return {"content": ""}
+    try:
+        data = oss_service.get_object(skill.oss_md_key)
+        return {"content": data.decode("utf-8", errors="replace")}
+    except Exception:
+        return {"content": ""}
+
+
 @router.get("/{skill_id}/download")
 def download_skill(
     skill_id: int,
