@@ -305,6 +305,21 @@ class BohrClawStatusOut(BaseModel):
         from_attributes = True
 
 
+# ─── Diagnosis Report ─────────────────────────────────────
+
+class DiagnosisReportOut(BaseModel):
+    id: int
+    paper_id: int
+    uploader_user_id: int
+    uploader_name: Optional[str] = None
+    oss_key: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    class Config:
+        from_attributes = True
+
+
 # ─── Pagination ────────────────────────────────────────────
 
 class PaginatedResponse(BaseModel):
