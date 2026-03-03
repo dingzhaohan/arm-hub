@@ -12,7 +12,7 @@ import time
 import urllib.request
 import urllib.error
 
-from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK
+from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK, BOHRCLAW_IMAGE_ID
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ DEFAULT_LLM_MODELS = [
 ]
 
 # Default node config
-DEFAULT_IMAGE_ID = 121400
 DEFAULT_DISK_SIZE = 40
 DEFAULT_TURNOFF_AFTER = 24
 DEFAULT_NODE_NAME = "bobot-open"
@@ -138,7 +137,7 @@ def create_node(access_key: str, project_id: str, *,
         headers={"accessKey": access_key},
         data={
             "name": DEFAULT_NODE_NAME,
-            "imageId": DEFAULT_IMAGE_ID,
+            "imageId": BOHRCLAW_IMAGE_ID,
             "skuId": sku_id,
             "diskSize": DEFAULT_DISK_SIZE,
             "projectId": int(project_id),

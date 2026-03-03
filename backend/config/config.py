@@ -36,3 +36,6 @@ OSS_ROLE_ARN = os.getenv("OSS_ROLE_ARN", "")
 
 # ─── App ───────────────────────────────────────────────────
 APP_PORT = int(os.getenv("APP_PORT", "50005"))
+
+# ─── BohrClaw ─────────────────────────────────────────────
+BOHRCLAW_IMAGE_ID = int(os.getenv("BOHRCLAW_IMAGE_ID", "121400"))
