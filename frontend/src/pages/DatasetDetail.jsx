@@ -9,6 +9,8 @@ export default function DatasetDetail() {
   const [armVersions, setArmVersions] = useState([])
   const [papers, setPapers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [followed, setFollowed] = useState(false)
+  const [followLoading, setFollowLoading] = useState(false)
   const { user } = useAuth()
 
   useEffect(() => {
@@ -23,13 +25,37 @@ export default function DatasetDetail() {
     }).catch(console.error).finally(() => setLoading(false))
   }, [id])
 
+  useEffect(() => {
+    if (user) {
+      api.getFollowDatasetStatus(id).then(r => setFollowed(r.followed)).catch(() => {})
+    }
+  }, [id, user])
+
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
   if (!dataset) return <div className="text-center py-12 text-gray-500">Dataset not found</div>
 
   return (
     <div>
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">{dataset.name}</h1>
+        <div className="flex items-start justify-between mb-2">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{dataset.name}</h1>
+          {user && (
+            <button
+              onClick={() => {
+                setFollowLoading(true)
+                api.toggleFollowDataset(id).then(r => setFollowed(r.followed)).catch(console.error).finally(() => setFollowLoading(false))
+              }}
+              disabled={followLoading}
+              className={`ml-4 shrink-0 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                followed
+                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-700'
+              } disabled:opacity-50`}
+            >
+              {followLoading ? '...' : followed ? 'Following' : 'Follow'}
+            </button>
+          )}
+        </div>
         {dataset.description && <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">{dataset.description}</p>}
         <div className="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
           <span>Uploaded by: {dataset.uploader_name || 'Unknown'}</span>

@@ -101,6 +101,9 @@ export const api = {
   },
 
   // Follow
+  getFollowPaperStatus: (id) => request(`/me/follows/papers/${id}/status`),
+  getFollowDatasetStatus: (id) => request(`/me/follows/datasets/${id}/status`),
+  getFollowSkillStatus: (id) => request(`/me/follows/skills/${id}/status`),
   toggleFollowPaper: (id) => request(`/me/follows/papers/${id}`, { method: 'POST' }),
   toggleFollowDataset: (id) => request(`/me/follows/datasets/${id}`, { method: 'POST' }),
   toggleFollowSkill: (id) => request(`/me/follows/skills/${id}`, { method: 'POST' }),
@@ -119,4 +122,5 @@ export const api = {
   // BohrClaw
   getBohrClawStatus: () => request('/bohrclaw/status'),
   launchBohrClaw: () => request('/bohrclaw/launch', { method: 'POST' }),
+  destroyBohrClaw: () => request('/bohrclaw/destroy', { method: 'DELETE' }),
 }

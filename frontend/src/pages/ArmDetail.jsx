@@ -8,36 +8,19 @@ export default function ArmDetail() {
   const { user } = useAuth()
   const [series, setSeries] = useState(null)
   const [versions, setVersions] = useState([])
+  const [paper, setPaper] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     api.getArmSeriesDetail(id)
       .then(s => {
         setSeries(s)
-        // Load versions for this series - they come via the series endpoint listing
-        // The API returns versions on the arm-series listing, but for detail we need versions
-        // Use paper_id to get series with version info
+        return api.getPaper(s.paper_id)
       })
+      .then(setPaper)
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [id])
-
-  // Load versions by querying arm-series which includes version info
-  useEffect(() => {
-    if (!series) return
-    // The backend returns version_count and latest info via series endpoint
-    // For full version list we can query by checking paper arm-series
-    // Actually the /api/arm-series/{id} returns series info with version count
-    // We need a way to list versions - let's use paper arm-series
-    api.getPaperArmSeries(series.paper_id)
-      .then(data => {
-        // Find our series in the list
-        const items = Array.isArray(data) ? data : (data.items || [])
-        const found = items.find(s => s.id === series.id)
-        // Version details would need to be fetched individually
-      })
-      .catch(console.error)
-  }, [series])
 
   if (loading) return <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" /></div>
   if (!series) return <div className="text-center py-12 text-gray-500">ARM Series not found</div>
@@ -66,6 +49,22 @@ export default function ArmDetail() {
           )}
         </div>
       </div>
+
+      {/* Paper info card */}
+      {paper && (
+        <Link to={`/papers/${paper.id}`} className="block bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-800 p-5 mb-6 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Reproducing Paper</p>
+          <h3 className="font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2">{paper.title}</h3>
+          {paper.authors && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{paper.authors}</p>}
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            {paper.year && <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">{paper.year}</span>}
+            {paper.publication && <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 max-w-[200px] truncate">{paper.publication}</span>}
+            {paper.doi && <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">DOI: {paper.doi}</span>}
+            {paper.citation_nums > 0 && <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400">Cited {paper.citation_nums}</span>}
+          </div>
+          {paper.abstract && <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 line-clamp-3 leading-relaxed">{paper.abstract}</p>}
+        </Link>
+      )}
 
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Versions</h2>

@@ -20,10 +20,6 @@ function PaperCard({ paper, linkTo }) {
       className="block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
       {/* Title */}
       <h3 className="font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2">{title}</h3>
-      {titleZh && titleZh !== title && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{titleZh}</p>
-      )}
-
       {/* Authors */}
       {authors && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 line-clamp-1">{authors}</p>
@@ -72,23 +68,25 @@ function PaperCard({ paper, linkTo }) {
 }
 
 export default function Papers() {
+  const PAGE_SIZE = 20
   const [papers, setPapers] = useState([])
   const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [bohriumResults, setBohriumResults] = useState(null)
   const [bohriumLoading, setBohriumLoading] = useState(false)
   const { user } = useAuth()
 
-  const loadPapers = () => {
+  const loadPapers = (p = page) => {
     setLoading(true)
-    api.getPapers()
+    api.getPapers({ limit: PAGE_SIZE, offset: p * PAGE_SIZE })
       .then(data => { setPapers(data.items); setTotal(data.total) })
       .catch(console.error)
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { loadPapers() }, [])
+  useEffect(() => { loadPapers() }, [page])
 
   const handleSearch = () => {
     if (!search.trim()) return
@@ -96,7 +94,8 @@ export default function Papers() {
     api.searchBohriumPapers({ query: search, page_size: 20 })
       .then(data => {
         setBohriumResults(data)
-        loadPapers()
+        setPage(0)
+        loadPapers(0)
       })
       .catch(e => alert(e.message))
       .finally(() => setBohriumLoading(false))
@@ -155,6 +154,29 @@ export default function Papers() {
           {papers.map(paper => (
             <PaperCard key={paper.id} paper={paper} linkTo={`/papers/${paper.id}`} />
           ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-3 mt-6">
+          <button
+            onClick={() => setPage(p => p - 1)}
+            disabled={page === 0}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Prev
+          </button>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            {page + 1} / {Math.ceil(total / PAGE_SIZE)}
+          </span>
+          <button
+            onClick={() => setPage(p => p + 1)}
+            disabled={(page + 1) * PAGE_SIZE >= total}
+            className="px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next
+          </button>
         </div>
       )}
     </div>

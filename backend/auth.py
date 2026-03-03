@@ -33,7 +33,9 @@ def get_current_user(
         return None
 
     token = authorization[7:]
+    logger.info("Authenticating token (first 20 chars): %s...", token[:20])
     brm = verify_bohrium_token(token)
+    logger.info("Authenticated: bohrium_id=%s, username=%s", brm.id, brm.username)
 
     user = db.query(User).filter(User.bohrium_id == brm.id).first()
 

@@ -31,7 +31,7 @@ export default function App() {
         <Route path="/skills" element={<Skills />} />
         <Route path="/skills/:id" element={<SkillDetail />} />
         <Route path="/profile" element={<Profile />} />
-        <Route path="/playground" element={<BohrClaw />} />
+        <Route path="/bohrclaw" element={<BohrClaw />} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

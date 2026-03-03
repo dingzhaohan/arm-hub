@@ -1,4 +1,7 @@
 """ARM Hub — FastAPI application entry point."""
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
 from pathlib import Path
 
 from fastapi import FastAPI

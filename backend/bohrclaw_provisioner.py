@@ -12,12 +12,12 @@ import time
 import urllib.request
 import urllib.error
 
-from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK, BOHRCLAW_IMAGE_ID
+from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK, BOHRCLAW_IMAGE_ID, CHATBOHR_API
 
 logger = logging.getLogger(__name__)
 
 # Chatbohr LLM provision endpoint
-LLM_PROVISION_URL = "https://chatbohr.dp.tech/api/v1/llm/provision"
+LLM_PROVISION_URL = f"{CHATBOHR_API}/api/v1/llm/provision"
 
 # Default models for LLM provisioning
 DEFAULT_LLM_MODELS = [
@@ -118,7 +118,9 @@ def provision_llm_key(email: str, access_key: str) -> None:
         )
         logger.info("LLM key provisioned for %s", email)
     except urllib.error.HTTPError as e:
-        if e.code != 400:
+        if e.code == 400:
+            logger.info("LLM key already provisioned for %s", email)
+        else:
             logger.warning("LLM provision returned %s for %s", e.code, email)
     except Exception as e:
         logger.warning("LLM provision failed (non-fatal): %s", e)
@@ -157,6 +159,24 @@ def create_node(access_key: str, project_id: str, *,
 # ---------------------------------------------------------------------------
 # Step 3: Poll until node is ready (status == 2)
 # ---------------------------------------------------------------------------
+def delete_node(access_key: str, node_id: int) -> None:
+    """Delete a Bohrium node by ID."""
+    try:
+        resp = _api_request(
+            f"{_openapi_base()}/node/del/{int(node_id)}",
+            method="POST",
+            headers={"accessKey": access_key},
+            data={"id": int(node_id)},
+        )
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if hasattr(e, "read") else ""
+        logger.error("Node delete HTTP %s for node %s: %s", e.code, node_id, body)
+        raise RuntimeError(f"Node deletion failed: HTTP {e.code} — {body}")
+    if resp.get("code") != 0:
+        raise RuntimeError(f"Node deletion failed: {resp}")
+    logger.info("Node deleted: %s", node_id)
+
+
 def wait_for_node(access_key: str, node_id: int,
                   timeout_seconds: int = 300, poll_interval: int = 5) -> dict:
     """Poll the node list until the given node reaches status 2 (ready).
@@ -362,6 +382,33 @@ def start_openclaw(ip: str, password: str, domain_name: str,
 
 
 # ---------------------------------------------------------------------------
+# Step 5: Wait until OpenClaw web UI responds with HTTP 200
+# ---------------------------------------------------------------------------
+def wait_for_openclaw_ready(url: str, timeout: int = 120, interval: int = 5) -> None:
+    """Poll the OpenClaw web UI URL until it returns HTTP 200.
+
+    Raises TimeoutError if the service doesn't respond in time.
+    """
+    # Only check the base URL (strip query params like token)
+    check_url = url.split("?")[0] if "?" in url else url
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(check_url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    logger.info("OpenClaw service ready at %s", check_url)
+                    return
+        except Exception as e:
+            last_err = e
+        time.sleep(interval)
+    raise TimeoutError(
+        f"OpenClaw at {check_url} not ready within {timeout}s: {last_err}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Full provisioning flow
 # ---------------------------------------------------------------------------
 def provision_bohrclaw(email: str, access_key: str, project_id: str,
@@ -408,6 +455,11 @@ def provision_bohrclaw_with_progress(email: str, access_key: str, project_id: st
     # 4. SSH and start OpenClaw
     _step("starting_service")
     url = start_openclaw(ip, password, domain_name, access_key, project_id)
+
+    # 5. Verify OpenClaw service is reachable
+    if url:
+        _step("verifying_service")
+        wait_for_openclaw_ready(url, timeout=120, interval=5)
 
     return {
         "instance_url": url,

@@ -1,6 +1,6 @@
 # ARM Hub 开发进度
 
-> 最后更新: 2026-03-02
+> 最后更新: 2026-03-03
 
 ---
 
@@ -59,15 +59,19 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
 
 ### 6. BohrClaw (Agent Playground)
 
-- 导航栏 "BohrClaw" tab, 路由 `/playground`
-- 3 个状态: 未登录 → Launch 按钮 → **iframe 全屏嵌入 OpenClaw**
+- 导航栏 "BohrClaw" tab, 路由 `/bohrclaw`
+- 3 个状态: 未登录 → Launch 按钮 → 新标签页打开 BohrClaw
 - 后端 provisioning 流程:
   1. 通过 `bohrium-core` 查用户个人 AK (`/api/v1/ak/list`, X-User-Id)
   2. 通过 `openapi` 查用户项目列表 (`/project/list`), 自动选管理员项目
   3. 创建 Bohrium 计算节点 (`/node/add`)
   4. 轮询等待节点就绪 (status==2)
-  5. SSH 进节点启动 OpenClaw (`paramiko`)
-  6. 返回 Web UI URL, 前端用 iframe 嵌入
+  5. SSH 进节点, 用 supervisor 启动 OpenClaw (`paramiko`)
+  6. **健康检查**: 轮询 OpenClaw HTTP 端口直到返回 200 (最长 120s)
+  7. 返回 Web UI URL
+- 前端进度展示: 6 步 (fetching_ak → resolving_project → creating_node → waiting_node → starting_service → verifying_service)
+- 支持 Destroy 销毁实例 (删除 Bohrium 节点)
+- LLM 模型配置通过 ChatBohr API 自动 provision
 - 数据库: `bohrclaw_instances` 表 (bohrium_user_id, status, instance_url, node_id, node_ip)
 - 关键文件: `backend/bohrclaw_provisioner.py`, `backend/routes/bohrclaw.py`, `frontend/src/pages/BohrClaw.jsx`
 
@@ -141,7 +145,7 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
 | 无界缓存 (内存泄漏) | `bohrium_auth.py` |
 | 阻塞式 HTTP 调用 (占用 worker 线程) | `bohrium_auth.py`, `bohrclaw_provisioner.py` |
 | Profile 页缺少计算字段 | `routes/profile.py` |
-| 搜索结果无分页 | `routes/papers.py` |
+| 搜索结果无分页 | `routes/papers.py` — **已修复 (v0.7)**: 前端 Papers 页面已接入分页 |
 
 ---
 
@@ -177,8 +181,16 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
 - 新增 BohrClaw (Agent Playground) 页面
 - 导航栏 "BohrClaw" tab
 - Provisioning: bohrium-core 查 AK → openapi 查项目 → 创建节点 → SSH 启动 OpenClaw
-- 实例就绪后 iframe 全屏嵌入 (无需跳转新标签页)
+- 实例就绪后新标签页打开 (非 iframe)
 - Bug 修复: AK 环境不匹配 401, 硬编码 project_id / platform AK
+
+### v0.7 — 健康检查 + 分页 + 品牌统一
+- **OpenClaw 健康检查**: 启动 OpenClaw 后, 轮询 HTTP 200 确认服务可用才标记 ready, 避免用户打开白屏
+  - `wait_for_openclaw_ready(url, timeout=120, interval=5)` — 只检查 base URL (去掉 query params)
+  - 前端新增 `verifying_service` 进度步骤
+- **Papers 列表分页**: 前端 `loadPapers()` 传 `limit=20, offset=page*20`, 底部 Prev/Next 翻页
+  - 后端 `GET /api/papers` 已支持 `limit`/`offset`, 返回 `total`, 前端原来没用
+- **品牌统一**: 所有 "OpenClaw" 展示文本改为 "BohrClaw", 路由 `/playground` → `/bohrclaw`
 
 ---
 
@@ -243,6 +255,14 @@ VITE_BOHRIUM_ENV=dev   # dev 对应 test.bohrium.com
 - `account.test.dp.tech` 在公网不可达 (返回 432), 需飞连 VPN 或部署到内网
 
 ### BohrClaw
-- OpenClaw 返回的 URL 可以直接 iframe 嵌入, 只要目标服务没有设置 `X-Frame-Options: DENY`
-- Provisioning 是同步阻塞操作 (创建节点 + 等待就绪 + SSH), 可能耗时数分钟, 前端需显示 loading 状态
-- 用户的 project_id 应动态查询, 不能写死; 优先选 `projectRole=1` (管理员) 的项目
+- 所有面向用户的文本统一用 "BohrClaw" 品牌, 不要混用 OpenClaw
+- 路由路径 `/bohrclaw`, 不要用 `/playground` 等泛化名称
+- OpenClaw 服务启动后不能立即标记 ready — 进程起来不代表 HTTP 可用, 必须健康检查
+- 健康检查只 GET base URL (去掉 `?token=...`), 返回 200 即算就绪
+- 超时 120s 足够 (supervisor 会自动重启 gateway, 通常 30s 内就绪)
+- 前端进度条要和后端 `on_step()` 回调的 step key 严格对齐, 否则进度会跳步
+
+### 分页
+- 后端如果已支持 `limit`/`offset` 分页, 前端一定要用上, 不要无参全量加载
+- 分页 UI: `page` state (0-based), `offset = page * PAGE_SIZE`, `total > PAGE_SIZE` 时显示
+- 搜索后要 `setPage(0)` 重置页码, 否则可能看到空页

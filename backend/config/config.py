@@ -27,6 +27,9 @@ BOHRIUM_BASE_URL = os.getenv("BOHRIUM_BASE_URL", "https://uat.bohrium.com")
 BOHRIUM_RAG_ACCESS_KEY = os.getenv("BOHRIUM_RAG_ACCESS_KEY", "")
 BOHRIUM_RAG_ACCESS_SECRET = os.getenv("BOHRIUM_RAG_ACCESS_SECRET", "")
 
+# ─── ChatBohr (LLM Provision) ────────────────────────────
+CHATBOHR_API = os.getenv("CHATBOHR_API", "https://chatbohr.test.dp.tech")
+
 # ─── OSS ───────────────────────────────────────────────────
 OSS_ENDPOINT = os.getenv("OSS_ENDPOINT", "")
 OSS_BUCKET = os.getenv("OSS_BUCKET", "arm-hub")

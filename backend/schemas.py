@@ -180,6 +180,7 @@ class DatasetBrief(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    size_bytes: int = 0
     downloads: int = 0
     class Config:
         from_attributes = True
@@ -216,6 +217,7 @@ class SkillBrief(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    version: Optional[str] = None
     downloads: int = 0
     class Config:
         from_attributes = True
