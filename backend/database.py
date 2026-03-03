@@ -252,3 +252,19 @@ class ARMScoreResult(Base):
 
     job = relationship("ARMScoreJob")
     arm_version = relationship("ARMVersion")
+
+
+# ─── Diagnosis Reports ────────────────────────────────────
+
+class DiagnosisReport(Base):
+    __tablename__ = "diagnosis_reports"
+    id = Column(Integer, primary_key=True, index=True)
+    paper_id = Column(Integer, ForeignKey("papers.id"), nullable=False, index=True)
+    uploader_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    oss_key = Column(String(500), nullable=True)
+    status = Column(String(20), default="draft")  # draft/uploading/ready
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    paper = relationship("Paper")
+    uploader = relationship("User")
