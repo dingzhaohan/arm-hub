@@ -294,6 +294,8 @@ class BohrClawStatusOut(BaseModel):
     id: int
     bohrium_user_id: int
     status: str
+    progress_step: Optional[str] = None
+    error_message: Optional[str] = None
     instance_url: Optional[str] = None
     node_id: Optional[str] = None
     node_ip: Optional[str] = None

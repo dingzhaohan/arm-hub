@@ -256,7 +256,18 @@ def start_openclaw(ip: str, password: str, domain_name: str,
 # ---------------------------------------------------------------------------
 def provision_bohrclaw(email: str, access_key: str, project_id: str,
                        machine_type: str = "c2_m4_cpu") -> dict:
-    """Run the full BohrClaw provisioning pipeline.
+    """Run the full BohrClaw provisioning pipeline (no progress callback)."""
+    return provision_bohrclaw_with_progress(email, access_key, project_id,
+                                            machine_type=machine_type)
+
+
+def provision_bohrclaw_with_progress(email: str, access_key: str, project_id: str,
+                                     machine_type: str = "c2_m4_cpu",
+                                     on_step=None) -> dict:
+    """Run the full BohrClaw provisioning pipeline with step callbacks.
+
+    on_step(step_name) is called before each major phase:
+        "creating_node", "waiting_node", "starting_service"
 
     Returns:
         {
@@ -265,13 +276,19 @@ def provision_bohrclaw(email: str, access_key: str, project_id: str,
             "node_ip": "1.2.3.4",
         }
     """
+    def _step(name):
+        if on_step:
+            on_step(name)
+
     # 1. Provision LLM key (non-blocking on failure)
     provision_llm_key(email, access_key)
 
     # 2. Create node
+    _step("creating_node")
     node_id = create_node(access_key, project_id, machine_type=machine_type)
 
     # 3. Wait for node ready
+    _step("waiting_node")
     node_info = wait_for_node(access_key, node_id, timeout_seconds=300)
 
     ip = node_info["ip"]
@@ -279,6 +296,7 @@ def provision_bohrclaw(email: str, access_key: str, project_id: str,
     password = node_info["nodePwd"]
 
     # 4. SSH and start OpenClaw
+    _step("starting_service")
     url = start_openclaw(ip, password, domain_name, access_key, project_id)
 
     return {

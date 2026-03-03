@@ -1,18 +1,23 @@
 """BohrClaw routes — provision and manage personal OpenClaw instances.
 
-Fetches the user's personal access key from bohrium-core (via user ID),
-then uses it for all openapi calls (project list, node provisioning).
+POST /launch kicks off provisioning in a background thread and returns
+immediately. The frontend polls GET /status to track progress_step.
 """
+
+import logging
+import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from database import get_db, BohrClawInstance, User
+from database import get_db, BohrClawInstance, User, SessionLocal
 from schemas import BohrClawStatusOut
 from auth import get_current_user
 from app_config import limiter
 from bohrium_auth import get_user_access_key
-from bohrclaw_provisioner import provision_bohrclaw, get_user_project_id
+from bohrclaw_provisioner import provision_bohrclaw_with_progress, get_user_project_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/bohrclaw", tags=["bohrclaw"])
 
@@ -21,6 +26,63 @@ def _require_user(user: User | None) -> User:
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return user
+
+
+def _update_instance(instance_id: int, **kwargs):
+    """Update a BohrClawInstance in a fresh DB session (for use in threads)."""
+    db = SessionLocal()
+    try:
+        inst = db.query(BohrClawInstance).filter(BohrClawInstance.id == instance_id).first()
+        if inst:
+            for k, v in kwargs.items():
+                setattr(inst, k, v)
+            db.commit()
+    finally:
+        db.close()
+
+
+def _provision_background(instance_id: int, email: str, bohrium_user_id: int, bohrium_org_id: int):
+    """Run the full provisioning pipeline in a background thread."""
+    try:
+        # Step 1: Fetch AK
+        _update_instance(instance_id, progress_step="fetching_ak")
+        access_key = get_user_access_key(bohrium_user_id, bohrium_org_id)
+
+        # Step 2: Resolve project
+        _update_instance(instance_id, progress_step="resolving_project")
+        project_id = get_user_project_id(access_key)
+
+        # Step 3-5: Provision (create node → wait → SSH start)
+        def on_step(step: str):
+            _update_instance(instance_id, progress_step=step)
+
+        result = provision_bohrclaw_with_progress(
+            email=email,
+            access_key=access_key,
+            project_id=str(project_id),
+            on_step=on_step,
+        )
+
+        # Done
+        url = result.get("instance_url")
+        _update_instance(
+            instance_id,
+            instance_url=url,
+            node_id=result.get("node_id"),
+            node_ip=result.get("node_ip"),
+            status="ready" if url else "failed",
+            progress_step=None,
+            error_message=None if url else "Provisioning completed but no URL was returned",
+        )
+
+    except Exception as e:
+        logger.error("BohrClaw provisioning failed for instance %s: %s", instance_id, e)
+        _update_instance(
+            instance_id,
+            status="failed",
+            progress_step=None,
+            error_message=str(e),
+        )
 
 
 @router.get("/status", response_model=BohrClawStatusOut | None)
@@ -58,52 +120,29 @@ def launch_bohrclaw(
     if existing:
         if existing.status == "ready":
             return BohrClawStatusOut.model_validate(existing)
+        if existing.status == "provisioning":
+            # Already in progress
+            return BohrClawStatusOut.model_validate(existing)
         # Failed or stale — delete and re-provision
         db.delete(existing)
         db.commit()
 
-    # Step 1: Fetch the user's personal access key from bohrium-core
-    access_key = get_user_access_key(user.bohrium_id, user.bohrium_org_id)
-
-    # Step 2: Dynamically resolve the user's project ID via openapi
-    try:
-        project_id = get_user_project_id(access_key)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to resolve project: {e}")
-
     # Create a provisioning record
-    instance = BohrClawInstance(bohrium_user_id=user.bohrium_id, status="provisioning")
+    instance = BohrClawInstance(
+        bohrium_user_id=user.bohrium_id,
+        status="provisioning",
+        progress_step="fetching_ak",
+    )
     db.add(instance)
     db.commit()
     db.refresh(instance)
 
-    # Step 3: Run the full provisioning pipeline
-    try:
-        result = provision_bohrclaw(
-            email=user.email,
-            access_key=access_key,
-            project_id=str(project_id),
-        )
-    except TimeoutError as e:
-        instance.status = "failed"
-        db.commit()
-        raise HTTPException(status_code=504, detail=str(e))
-    except Exception as e:
-        instance.status = "failed"
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Provisioning failed: {e}")
-
-    instance.instance_url = result.get("instance_url")
-    instance.node_id = result.get("node_id")
-    instance.node_ip = result.get("node_ip")
-    instance.status = "ready" if instance.instance_url else "failed"
-    db.commit()
-    db.refresh(instance)
-
-    if instance.status == "failed":
-        raise HTTPException(
-            status_code=500,
-            detail="Provisioning completed but no URL was returned",
-        )
+    # Launch provisioning in background thread
+    t = threading.Thread(
+        target=_provision_background,
+        args=(instance.id, user.email, user.bohrium_id, user.bohrium_org_id),
+        daemon=True,
+    )
+    t.start()
 
     return BohrClawStatusOut.model_validate(instance)
