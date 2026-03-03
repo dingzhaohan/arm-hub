@@ -216,7 +216,9 @@ class BohrClawInstance(Base):
     __tablename__ = "bohrclaw_instances"
     id = Column(Integer, primary_key=True, index=True)
     bohrium_user_id = Column(Integer, unique=True, nullable=False, index=True)
-    status = Column(String(20), default="provisioning")  # provisioning/ready/failed/stopped
+    status = Column(String(30), default="provisioning")  # provisioning/ready/failed/stopped
+    progress_step = Column(String(30), nullable=True)    # fetching_ak/resolving_project/creating_node/waiting_node/starting_service
+    error_message = Column(Text, nullable=True)
     instance_url = Column(String(500), nullable=True)
     node_id = Column(String(50), nullable=True)
     node_ip = Column(String(50), nullable=True)

@@ -19,6 +19,7 @@ export default function ArmVersionDetail() {
   const { id } = useParams()
   const { user } = useAuth()
   const [version, setVersion] = useState(null)
+  const [paper, setPaper] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('code')
   const [reportContent, setReportContent] = useState(null)
@@ -30,7 +31,11 @@ export default function ArmVersionDetail() {
 
   useEffect(() => {
     api.getArmVersion(id)
-      .then(setVersion)
+      .then(v => {
+        setVersion(v)
+        return api.getPaper(v.paper_id)
+      })
+      .then(setPaper)
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [id])
@@ -136,6 +141,20 @@ export default function ArmVersionDetail() {
           </div>
         )}
       </div>
+
+      {/* Paper info */}
+      {paper && (
+        <Link to={`/papers/${paper.id}`} className="block bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-800 p-4 mb-6 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Paper</p>
+          <h3 className="font-medium text-gray-900 dark:text-white leading-snug line-clamp-2 text-sm">{paper.title}</h3>
+          {paper.authors && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{paper.authors}</p>}
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            {paper.year && <span className="inline-flex px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400">{paper.year}</span>}
+            {paper.publication && <span className="inline-flex px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 max-w-[180px] truncate">{paper.publication}</span>}
+            {paper.citation_nums > 0 && <span className="text-xs text-amber-700 dark:text-amber-400">Cited {paper.citation_nums}</span>}
+          </div>
+        </Link>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700 mb-6">

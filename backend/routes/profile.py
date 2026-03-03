@@ -12,9 +12,41 @@ from schemas import (
     UserOut, PaperOut, ARMSeriesOut, DatasetBrief, SkillBrief,
 )
 from app_config import limiter
-from auth import require_login
+from auth import require_login, get_current_user
 
 router = APIRouter(tags=["profile"])
+
+
+# ─── Follow Status Check ────────────────────────────────────
+
+@router.get("/api/me/follows/papers/{paper_id}/status", response_model=FollowToggleOut)
+def get_follow_paper_status(paper_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user:
+        return FollowToggleOut(followed=False)
+    exists = db.query(UserFollowPaper).filter(
+        UserFollowPaper.user_id == user.id, UserFollowPaper.paper_id == paper_id
+    ).first()
+    return FollowToggleOut(followed=bool(exists))
+
+
+@router.get("/api/me/follows/datasets/{dataset_id}/status", response_model=FollowToggleOut)
+def get_follow_dataset_status(dataset_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user:
+        return FollowToggleOut(followed=False)
+    exists = db.query(UserFollowDataset).filter(
+        UserFollowDataset.user_id == user.id, UserFollowDataset.dataset_id == dataset_id
+    ).first()
+    return FollowToggleOut(followed=bool(exists))
+
+
+@router.get("/api/me/follows/skills/{skill_id}/status", response_model=FollowToggleOut)
+def get_follow_skill_status(skill_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    if not user:
+        return FollowToggleOut(followed=False)
+    exists = db.query(UserFollowSkill).filter(
+        UserFollowSkill.user_id == user.id, UserFollowSkill.skill_id == skill_id
+    ).first()
+    return FollowToggleOut(followed=bool(exists))
 
 
 # ─── Follow Toggle ──────────────────────────────────────────

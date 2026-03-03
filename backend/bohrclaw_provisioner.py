@@ -12,12 +12,12 @@ import time
 import urllib.request
 import urllib.error
 
-from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK
+from config.config import BOHRIUM_OPENPLATFORM_API, BOHRIUM_OPENPLATFORM_AK, BOHRCLAW_IMAGE_ID, CHATBOHR_API
 
 logger = logging.getLogger(__name__)
 
 # Chatbohr LLM provision endpoint
-LLM_PROVISION_URL = "https://chatbohr.dp.tech/api/v1/llm/provision"
+LLM_PROVISION_URL = f"{CHATBOHR_API}/api/v1/llm/provision"
 
 # Default models for LLM provisioning
 DEFAULT_LLM_MODELS = [
@@ -31,9 +31,8 @@ DEFAULT_LLM_MODELS = [
 ]
 
 # Default node config
-DEFAULT_IMAGE_ID = 121400
 DEFAULT_DISK_SIZE = 40
-DEFAULT_TURNOFF_AFTER = 24
+DEFAULT_TURNOFF_AFTER = -1  # -1 = never auto shutdown
 DEFAULT_NODE_NAME = "bobot-open"
 DEFAULT_MODEL_ID = "openapi/claude-4.5-sonnet"
 
@@ -119,7 +118,9 @@ def provision_llm_key(email: str, access_key: str) -> None:
         )
         logger.info("LLM key provisioned for %s", email)
     except urllib.error.HTTPError as e:
-        if e.code != 400:
+        if e.code == 400:
+            logger.info("LLM key already provisioned for %s", email)
+        else:
             logger.warning("LLM provision returned %s for %s", e.code, email)
     except Exception as e:
         logger.warning("LLM provision failed (non-fatal): %s", e)
@@ -138,7 +139,7 @@ def create_node(access_key: str, project_id: str, *,
         headers={"accessKey": access_key},
         data={
             "name": DEFAULT_NODE_NAME,
-            "imageId": DEFAULT_IMAGE_ID,
+            "imageId": BOHRCLAW_IMAGE_ID,
             "skuId": sku_id,
             "diskSize": DEFAULT_DISK_SIZE,
             "projectId": int(project_id),
@@ -158,6 +159,24 @@ def create_node(access_key: str, project_id: str, *,
 # ---------------------------------------------------------------------------
 # Step 3: Poll until node is ready (status == 2)
 # ---------------------------------------------------------------------------
+def delete_node(access_key: str, node_id: int) -> None:
+    """Delete a Bohrium node by ID."""
+    try:
+        resp = _api_request(
+            f"{_openapi_base()}/node/del/{int(node_id)}",
+            method="POST",
+            headers={"accessKey": access_key},
+            data={"id": int(node_id)},
+        )
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if hasattr(e, "read") else ""
+        logger.error("Node delete HTTP %s for node %s: %s", e.code, node_id, body)
+        raise RuntimeError(f"Node deletion failed: HTTP {e.code} — {body}")
+    if resp.get("code") != 0:
+        raise RuntimeError(f"Node deletion failed: {resp}")
+    logger.info("Node deleted: %s", node_id)
+
+
 def wait_for_node(access_key: str, node_id: int,
                   timeout_seconds: int = 300, poll_interval: int = 5) -> dict:
     """Poll the node list until the given node reaches status 2 (ready).
@@ -212,22 +231,132 @@ def _wait_ssh_ready(ip: str, password: str, retries: int = 15, interval: int = 5
             time.sleep(interval)
 
 
+def _build_remote_script(access_key: str, project_id: str,
+                         domain_name: str, model_id: str) -> str:
+    """Build the remote bash script that configures and starts OpenClaw via supervisor."""
+    return r'''
+ACCESS_KEY="$1"
+PROJECT_ID="$2"
+DOMAIN_NAME="$3"
+MODEL_ENV="$4"
+
+# Write env vars to .bashrc for persistence
+sed -i '/^export ACCESS_KEY=/d' ~/.bashrc 2>/dev/null
+sed -i '/^export PROJECT_ID=/d' ~/.bashrc 2>/dev/null
+safe_val() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+echo "export ACCESS_KEY='$(safe_val "$ACCESS_KEY")'" >> ~/.bashrc
+echo "export PROJECT_ID='$(safe_val "$PROJECT_ID")'" >> ~/.bashrc
+export ACCESS_KEY PROJECT_ID
+
+# 1) Generate config/token only, do NOT launch gateway (supervisor will manage it)
+# Use bash -lc to ensure correct PATH (e.g. /opt/mamba/bin/python)
+bash -lc "env ${MODEL_ENV} OPENCLAW_WEB_UI_HOST='$DOMAIN_NAME' OPENCLAW_API_KEY='$ACCESS_KEY' OPENCLAW_NO_LAUNCH=1 python /root/start.py"
+
+# 2) Install supervisor
+apt-get update -qq && apt-get install -y supervisor >/dev/null 2>&1 || true
+
+OPENCLAW_SUPERVISORD_CONF="/etc/supervisor/openclaw-supervisord.conf"
+cat > "$OPENCLAW_SUPERVISORD_CONF" <<'SDCONF'
+[unix_http_server]
+file=/var/run/openclaw-supervisor.sock
+chmod=0700
+
+[supervisord]
+logfile=/var/log/supervisord.log
+logfile_maxbytes=50MB
+loglevel=info
+pidfile=/var/run/openclaw-supervisord.pid
+nodaemon=false
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///var/run/openclaw-supervisor.sock
+
+[include]
+files = /etc/supervisor/conf.d/*.conf
+SDCONF
+
+# Stop old supervisord if running
+pkill -x supervisord 2>/dev/null || true
+sleep 1
+
+# 3) Clean up old gateway process
+PIDFILE="/root/.openclaw/openclawgateway.pid"
+if [ -f "$PIDFILE" ]; then
+  kill -TERM "$(cat "$PIDFILE")" 2>/dev/null || true
+  sleep 1
+  kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
+  rm -f "$PIDFILE"
+fi
+# Port fallback: force-release 50001 if still occupied
+if ss -ltnp 2>/dev/null | grep -q ":50001"; then
+  fuser -k 50001/tcp 2>/dev/null || true
+fi
+
+# 4) Write openclaw-gateway supervisor program config
+cat >/etc/supervisor/conf.d/openclaw-gateway.conf <<'SUPERVISORCONF'
+[program:openclaw-gateway]
+directory=/root
+command=/bin/bash -lc 'openclaw gateway --help 2>&1 | grep -q -- "--config" && exec openclaw gateway --config /root/.openclaw/openclaw.json || exec openclaw gateway'
+autostart=true
+autorestart=true
+startretries=999
+startsecs=2
+stopsignal=TERM
+stopwaitsecs=10
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/openclaw-gateway.out.log
+stderr_logfile=/var/log/openclaw-gateway.err.log
+SUPERVISORCONF
+
+# 5) Start supervisord (autostart=true will bring up gateway)
+supervisord -c "$OPENCLAW_SUPERVISORD_CONF"
+sleep 3
+supervisorctl -c "$OPENCLAW_SUPERVISORD_CONF" status openclaw-gateway
+STATUS=$(supervisorctl -c "$OPENCLAW_SUPERVISORD_CONF" status openclaw-gateway | awk '{print $2}')
+if [ "$STATUS" != "RUNNING" ]; then
+  echo "WARNING: supervisor process status: $STATUS"
+  echo "Check logs: tail /var/log/openclaw-gateway.err.log"
+fi
+'''
+
+
 def start_openclaw(ip: str, password: str, domain_name: str,
                    access_key: str, project_id: str,
                    model_id: str = DEFAULT_MODEL_ID) -> str:
-    """SSH into the node, set env vars, run start.py, return Web UI URL."""
-    _wait_ssh_ready(ip, password)
+    """SSH into the node via domain, configure env, start OpenClaw via supervisor, return Web UI URL."""
+    ssh_host = domain_name or ip
+    _wait_ssh_ready(ssh_host, password)
 
-    remote_cmd = (
-        f"export ACCESS_KEY='{access_key}' && "
-        f"export PROJECT_ID='{project_id}' && "
-        f"export MODEL_ID='{model_id}' && "
-        f"export OPENCLAW_WEB_UI_HOST='{domain_name}' && "
-        f"export OPENCLAW_API_KEY='{access_key}' && "
-        f"python /root/start.py"
-    )
+    model_env = f"MODEL_ID={model_id}"
+    remote_script = _build_remote_script(access_key, project_id, domain_name, model_id)
 
-    output = _ssh_exec(ip, password, remote_cmd, timeout=120)
+    # Use paramiko to send script via stdin with args, matching the bash approach
+    import paramiko
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(ssh_host, username="root", password=password,
+                   timeout=30, look_for_keys=False, allow_agent=False)
+
+    # Execute: bash -s -- <access_key> <project_id> <domain_name> <model_env>
+    cmd = f"bash -s -- '{access_key}' '{project_id}' '{domain_name}' '{model_env}'"
+    stdin_ch, stdout_ch, stderr_ch = client.exec_command(cmd, timeout=180)
+    stdin_ch.write(remote_script)
+    stdin_ch.channel.shutdown_write()
+
+    output = stdout_ch.read().decode()
+    err_output = stderr_ch.read().decode()
+    exit_code = stdout_ch.channel.recv_exit_status()
+    client.close()
+
+    logger.info("OpenClaw remote output:\n%s", output)
+    if err_output:
+        logger.info("OpenClaw remote stderr:\n%s", err_output)
+    if exit_code != 0:
+        logger.warning("OpenClaw remote script exited with code %s", exit_code)
 
     # Parse URL from output
     url = None
@@ -253,11 +382,49 @@ def start_openclaw(ip: str, password: str, domain_name: str,
 
 
 # ---------------------------------------------------------------------------
+# Step 5: Wait until OpenClaw web UI responds with HTTP 200
+# ---------------------------------------------------------------------------
+def wait_for_openclaw_ready(url: str, timeout: int = 120, interval: int = 5) -> None:
+    """Poll the OpenClaw web UI URL until it returns HTTP 200.
+
+    Raises TimeoutError if the service doesn't respond in time.
+    """
+    # Only check the base URL (strip query params like token)
+    check_url = url.split("?")[0] if "?" in url else url
+    deadline = time.time() + timeout
+    last_err = None
+    while time.time() < deadline:
+        try:
+            req = urllib.request.Request(check_url, method="GET")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    logger.info("OpenClaw service ready at %s", check_url)
+                    return
+        except Exception as e:
+            last_err = e
+        time.sleep(interval)
+    raise TimeoutError(
+        f"OpenClaw at {check_url} not ready within {timeout}s: {last_err}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Full provisioning flow
 # ---------------------------------------------------------------------------
 def provision_bohrclaw(email: str, access_key: str, project_id: str,
                        machine_type: str = "c2_m4_cpu") -> dict:
-    """Run the full BohrClaw provisioning pipeline.
+    """Run the full BohrClaw provisioning pipeline (no progress callback)."""
+    return provision_bohrclaw_with_progress(email, access_key, project_id,
+                                            machine_type=machine_type)
+
+
+def provision_bohrclaw_with_progress(email: str, access_key: str, project_id: str,
+                                     machine_type: str = "c2_m4_cpu",
+                                     on_step=None) -> dict:
+    """Run the full BohrClaw provisioning pipeline with step callbacks.
+
+    on_step(step_name) is called before each major phase:
+        "creating_node", "waiting_node", "starting_service"
 
     Returns:
         {
@@ -266,13 +433,19 @@ def provision_bohrclaw(email: str, access_key: str, project_id: str,
             "node_ip": "1.2.3.4",
         }
     """
+    def _step(name):
+        if on_step:
+            on_step(name)
+
     # 1. Provision LLM key (non-blocking on failure)
     provision_llm_key(email, access_key)
 
     # 2. Create node
+    _step("creating_node")
     node_id = create_node(access_key, project_id, machine_type=machine_type)
 
     # 3. Wait for node ready
+    _step("waiting_node")
     node_info = wait_for_node(access_key, node_id, timeout_seconds=300)
 
     ip = node_info["ip"]
@@ -280,7 +453,13 @@ def provision_bohrclaw(email: str, access_key: str, project_id: str,
     password = node_info["nodePwd"]
 
     # 4. SSH and start OpenClaw
+    _step("starting_service")
     url = start_openclaw(ip, password, domain_name, access_key, project_id)
+
+    # 5. Verify OpenClaw service is reachable
+    if url:
+        _step("verifying_service")
+        wait_for_openclaw_ready(url, timeout=120, interval=5)
 
     return {
         "instance_url": url,

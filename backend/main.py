@@ -1,4 +1,7 @@
 """ARM Hub — FastAPI application entry point."""
+import logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -31,6 +34,20 @@ try:
     if "arm_zip_key" not in cols:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE arm_versions ADD COLUMN arm_zip_key VARCHAR(500) NULL"))
+except Exception:
+    pass
+
+# Migrate: add progress_step / error_message to bohrclaw_instances
+try:
+    from sqlalchemy import text, inspect as sa_inspect
+    bc_insp = sa_inspect(engine)
+    if "bohrclaw_instances" in bc_insp.get_table_names():
+        bc_cols = [c["name"] for c in bc_insp.get_columns("bohrclaw_instances")]
+        with engine.begin() as conn:
+            if "progress_step" not in bc_cols:
+                conn.execute(text("ALTER TABLE bohrclaw_instances ADD COLUMN progress_step VARCHAR(30) NULL"))
+            if "error_message" not in bc_cols:
+                conn.execute(text("ALTER TABLE bohrclaw_instances ADD COLUMN error_message TEXT NULL"))
 except Exception:
     pass
 

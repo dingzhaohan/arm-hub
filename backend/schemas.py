@@ -180,6 +180,7 @@ class DatasetBrief(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    size_bytes: int = 0
     downloads: int = 0
     class Config:
         from_attributes = True
@@ -216,6 +217,7 @@ class SkillBrief(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    version: Optional[str] = None
     downloads: int = 0
     class Config:
         from_attributes = True
@@ -294,6 +296,8 @@ class BohrClawStatusOut(BaseModel):
     id: int
     bohrium_user_id: int
     status: str
+    progress_step: Optional[str] = None
+    error_message: Optional[str] = None
     instance_url: Optional[str] = None
     node_id: Optional[str] = None
     node_ip: Optional[str] = None
