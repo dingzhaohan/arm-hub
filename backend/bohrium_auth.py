@@ -77,13 +77,14 @@ def _extract_identity(token: str) -> tuple[int, int]:
 
 def _fetch_bohrium_user_info(token: str, user_id: int, org_id: int) -> dict:
     url = f"{BOHRIUM_ACCOUNT_API}/account_api/users/{user_id}?orgId={org_id}"
+    logger.info("Verifying token for userId=%s orgId=%s via %s", user_id, org_id, url)
     req = urllib.request.Request(url, method="GET")
     req.add_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        logger.warning("Bohrium API returned %s for userId=%s", e.code, user_id)
+        logger.warning("Bohrium API returned %s for userId=%s, url=%s", e.code, user_id, url)
         raise HTTPException(status_code=401, detail="Bohrium token invalid or expired")
     except Exception as e:
         logger.error("Bohrium API request failed: %s", e)

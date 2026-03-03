@@ -163,13 +163,17 @@ def destroy_bohrclaw(
         raise HTTPException(status_code=404, detail="No instance found")
 
     # Delete the Bohrium node if we have a node_id and user has valid credentials
+    node_deleted = True
     if instance.node_id:
         try:
             access_key = get_user_access_key(user.bohrium_id, user.bohrium_org_id)
             delete_node(access_key, int(instance.node_id))
         except Exception as e:
+            node_deleted = False
             logger.warning("Failed to delete Bohrium node %s: %s", instance.node_id, e)
 
     db.delete(instance)
     db.commit()
+    if not node_deleted:
+        return {"detail": "Instance record removed, but Bohrium node deletion failed — may need manual cleanup"}
     return {"detail": "Instance destroyed"}
