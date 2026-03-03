@@ -9,7 +9,7 @@ export default function PaperDetail() {
   const [armSeries, setArmSeries] = useState([])
   const [datasets, setDatasets] = useState([])
   const [skills, setSkills] = useState([])
-  const [loading, setLoading] = useState(true) 
+  const [loading, setLoading] = useState(true)
   const { user } = useAuth()
 
   useEffect(() => {
