@@ -32,7 +32,7 @@ DEFAULT_LLM_MODELS = [
 
 # Default node config
 DEFAULT_DISK_SIZE = 40
-DEFAULT_TURNOFF_AFTER = 24
+DEFAULT_TURNOFF_AFTER = -1  # -1 = never auto shutdown
 DEFAULT_NODE_NAME = "bobot-open"
 DEFAULT_MODEL_ID = "openapi/claude-4.5-sonnet"
 
