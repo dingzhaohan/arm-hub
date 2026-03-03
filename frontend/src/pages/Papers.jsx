@@ -20,10 +20,6 @@ function PaperCard({ paper, linkTo }) {
       className="block bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
       {/* Title */}
       <h3 className="font-semibold text-gray-900 dark:text-white leading-snug line-clamp-2">{title}</h3>
-      {titleZh && titleZh !== title && (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 line-clamp-1">{titleZh}</p>
-      )}
-
       {/* Authors */}
       {authors && (
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 line-clamp-1">{authors}</p>
