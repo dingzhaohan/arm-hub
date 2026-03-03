@@ -41,6 +41,12 @@ export const api = {
   ensurePaper: (data) => request('/papers/ensure', { method: 'POST', body: JSON.stringify(data) }),
   searchBohriumPapers: (data) => request('/papers/search/bohrium', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Paper Diagnosis
+  createDiagnosisReport: (paperId) => request(`/papers/${paperId}/diagnosis`, { method: 'POST' }),
+  completeDiagnosisReport: (paperId, reportId) => request(`/papers/${paperId}/diagnosis/${reportId}/complete`, { method: 'POST' }),
+  getDiagnosis: (paperId) => request(`/papers/${paperId}/diagnosis`),
+  deleteDiagnosisReport: (paperId, reportId) => request(`/papers/${paperId}/diagnosis/${reportId}`, { method: 'DELETE' }),
+
   // ARM Series
   getArmSeries: (params = {}) => {
     const q = new URLSearchParams(params).toString()
