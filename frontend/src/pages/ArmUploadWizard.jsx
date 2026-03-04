@@ -442,16 +442,8 @@ function StepUploadArmZip({ version, armZipKey, setArmZipKey, onNext, setError }
     <div>
       <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Upload ARM Package</h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        Upload a single .zip file containing your ARM. The zip must have exactly 4 top-level folders:
+        Upload a .zip file containing your ARM. Any structure is accepted — if it contains README.md, REPORT.md, or RESULT.md, they will be displayed on the detail page.
       </p>
-
-      <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mb-4 font-mono text-sm text-gray-700 dark:text-gray-300">
-        <div>arm.zip</div>
-        <div className="ml-4">Code/ <span className="text-gray-400">(must contain README.md)</span></div>
-        <div className="ml-4">Report/ <span className="text-gray-400">(must contain exactly one .md file)</span></div>
-        <div className="ml-4">Dataset/ <span className="text-gray-400">(can be empty)</span></div>
-        <div className="ml-4">Trace/ <span className="text-gray-400">(can be empty)</span></div>
-      </div>
 
       {armZipKey ? (
         <div className="mb-4">
@@ -519,7 +511,7 @@ function StepSubmit({ version, armZipKey, submitting, onSubmit }) {
       </div>
 
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        The server will validate and extract your zip into Code, Report, Dataset, and Trace modules.
+        The server will extract your zip and generate the file browser.
       </p>
 
       <button

@@ -1,4 +1,7 @@
 """Skill routes: CRUD, upload, download, reverse associations."""
+import io
+import mimetypes
+import zipfile
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
@@ -89,7 +92,7 @@ def skill_upload_credential(
 def complete_skill(
     request: Request,
     skill_id: int,
-    oss_zip_key: str = Query(...),
+    oss_zip_key: Optional[str] = Query(None),
     oss_md_key: Optional[str] = Query(None),
     user=Depends(require_login),
     db: Session = Depends(get_db),
@@ -137,6 +140,24 @@ def get_skill(skill_id: int, db: Session = Depends(get_db)):
     return _skill_to_out(skill)
 
 
+@router.get("/{skill_id}/readme")
+def get_skill_readme(
+    skill_id: int,
+    user=Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(404, "Skill not found")
+    if not skill.oss_md_key:
+        return {"content": ""}
+    try:
+        data = oss_service.get_object(skill.oss_md_key)
+        return {"content": data.decode("utf-8", errors="replace")}
+    except Exception:
+        return {"content": ""}
+
+
 @router.get("/{skill_id}/download")
 def download_skill(
     skill_id: int,
@@ -155,6 +176,135 @@ def download_skill(
 
     download_url = oss_service.sign_download_url(skill.oss_zip_key)
     return {"download_url": download_url}
+
+
+@router.get("/{skill_id}/download-readme")
+def download_skill_readme(
+    skill_id: int,
+    user=Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(404, "Skill not found")
+    if not skill.oss_md_key:
+        raise HTTPException(400, "Markdown file not uploaded yet")
+
+    download_url = oss_service.sign_download_url(skill.oss_md_key)
+    return {"download_url": download_url}
+
+
+@router.get("/{skill_id}/files")
+def browse_skill_files(
+    skill_id: int,
+    path: str = Query(""),
+    user=Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    """Browse uploaded zip: list directory or return file content."""
+    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    if not skill:
+        raise HTTPException(404, "Skill not found")
+    if not skill.oss_zip_key:
+        return {"entries": [], "path": path}
+
+    try:
+        zip_bytes = oss_service.get_object(skill.oss_zip_key)
+    except Exception:
+        raise HTTPException(404, "Skill zip not found in storage")
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Uploaded file is not a valid zip")
+
+    # Normalize: strip leading ./ and trailing /
+    all_names = [n.lstrip("./") for n in zf.namelist()]
+
+    # If path points to a file, return its content
+    if path:
+        # Find matching entry in zip
+        matched = None
+        for info in zf.infolist():
+            normalized = info.filename.lstrip("./")
+            if normalized == path and not info.is_dir():
+                matched = info
+                break
+
+        if matched:
+            raw = zf.read(matched)
+            mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+            is_text = mime.startswith("text/") or mime in (
+                "application/json", "application/xml", "application/javascript",
+                "application/x-yaml", "application/toml",
+            ) or path.endswith((".py", ".js", ".ts", ".jsx", ".tsx", ".sh",
+                                ".yml", ".yaml", ".toml", ".cfg", ".ini",
+                                ".rs", ".go", ".c", ".cpp", ".h", ".java",
+                                ".rb", ".php", ".swift", ".kt", ".r", ".R",
+                                ".sql", ".css", ".scss", ".less", ".html",
+                                ".vue", ".svelte", ".lua", ".pl", ".ex",
+                                ".exs", ".zig", ".nim", ".dart", ".tf",
+                                ".Makefile", ".Dockerfile", ".gitignore"))
+
+            if is_text and len(raw) <= 1024 * 1024:
+                content = raw.decode("utf-8", errors="replace")
+            elif is_text:
+                content = ""  # too large
+            else:
+                content = "[Binary file]"
+
+            # For binary files (e.g. PDF, images), provide a signed download URL
+            download_url = None
+            if not is_text or len(raw) > 1024 * 1024:
+                extracted_key = f"skills/{skill_id}/extracted/{path}"
+                try:
+                    # Upload extracted file to OSS for signed URL access
+                    oss_service.put_object(extracted_key, raw)
+                    download_url = oss_service.sign_download_url(extracted_key)
+                except Exception:
+                    pass
+
+            return {
+                "type": "file",
+                "path": path,
+                "content": content,
+                "size": matched.file_size,
+                "mime_type": mime,
+                "truncated": is_text and len(raw) > 1024 * 1024,
+                "download_url": download_url,
+            }
+
+    # Directory listing
+    prefix = path.rstrip("/") + "/" if path else ""
+    entries_map = {}
+
+    for name in all_names:
+        if not name or name == prefix.rstrip("/"):
+            continue
+        if not name.startswith(prefix):
+            continue
+        remainder = name[len(prefix):]
+        if not remainder or remainder == "/":
+            continue
+
+        if "/" in remainder.rstrip("/"):
+            dir_name = remainder.split("/")[0]
+            if dir_name and dir_name not in entries_map:
+                entries_map[dir_name] = {"name": dir_name, "type": "directory", "size": 0}
+        elif not remainder.endswith("/"):
+            info = None
+            for zi in zf.infolist():
+                if zi.filename.lstrip("./") == name:
+                    info = zi
+                    break
+            entries_map[remainder] = {
+                "name": remainder,
+                "type": "file",
+                "size": info.file_size if info else 0,
+            }
+
+    entries = sorted(entries_map.values(), key=lambda e: (0 if e["type"] == "directory" else 1, e["name"]))
+    return {"entries": entries, "path": path}
 
 
 @router.get("/{skill_id}/arm-versions")
