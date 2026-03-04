@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import hljs from 'highlight.js'
 import { api } from '../api'
 
 /**
@@ -28,14 +29,16 @@ export default function CodeBrowser({ armVersionId }) {
           // Directory listing
           setTree(data)
           setFile(null)
-          // Try to auto-load README.md if at root
+          // Try to auto-load a markdown file at root
           if (!currentPath && data.entries) {
-            const readme = data.entries.find(
-              e => e.type === 'file' && e.name.toLowerCase() === 'readme.md'
-            )
-            if (readme) {
-              loadFile(readme.name)
+            const files = data.entries.filter(e => e.type === 'file')
+            const priority = ['readme.md', 'report.md', 'result.md']
+            let target = null
+            for (const name of priority) {
+              target = files.find(e => e.name.toLowerCase() === name)
+              if (target) break
             }
+            if (target) loadFile(target.name)
           }
         } else if (data.content !== undefined) {
           // Direct file
@@ -225,6 +228,20 @@ function FileContent({ file }) {
     )
   }
 
+  // PDF preview via iframe
+  const isPdf = file.mime_type === 'application/pdf' || file.path?.toLowerCase().endsWith('.pdf')
+  if (isPdf && file.download_url) {
+    return (
+      <div className="flex flex-col" style={{ height: '700px' }}>
+        <iframe
+          src={file.download_url}
+          className="w-full flex-1 border-0"
+          title={file.path}
+        />
+      </div>
+    )
+  }
+
   if (file.content === '[Binary file]') {
     return (
       <div className="p-6 text-center">
@@ -252,21 +269,70 @@ function FileContent({ file }) {
     )
   }
 
-  // Code with line numbers
+  // Code with line numbers + syntax highlighting
+  const lang = extToLang(file.path)
+  const highlighted = useMemo(() => {
+    try {
+      if (lang) {
+        return hljs.highlight(file.content, { language: lang, ignoreIllegals: true }).value
+      }
+      return hljs.highlightAuto(file.content).value
+    } catch {
+      return null
+    }
+  }, [file.content, lang])
+
+  const lines = file.content.split('\n')
+
   return (
     <div className="overflow-auto max-h-[700px]">
       <pre className="text-sm leading-relaxed">
         <code>
-          {file.content.split('\n').map((line, i) => (
-            <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/50">
-              <span className="select-none text-gray-400 dark:text-gray-600 text-right w-12 pr-4 py-0 shrink-0 text-xs leading-relaxed">{i + 1}</span>
-              <span className="flex-1 px-4 py-0 whitespace-pre text-gray-800 dark:text-gray-200">{line}</span>
-            </div>
-          ))}
+          {highlighted ? (
+            lines.map((_, i) => (
+              <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                <span className="select-none text-gray-400 dark:text-gray-600 text-right w-12 pr-4 py-0 shrink-0 text-xs leading-relaxed">{i + 1}</span>
+                <span
+                  className="hljs flex-1 px-4 py-0 whitespace-pre"
+                  dangerouslySetInnerHTML={{ __html: getHighlightedLine(highlighted, i) }}
+                />
+              </div>
+            ))
+          ) : (
+            lines.map((line, i) => (
+              <div key={i} className="flex hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                <span className="select-none text-gray-400 dark:text-gray-600 text-right w-12 pr-4 py-0 shrink-0 text-xs leading-relaxed">{i + 1}</span>
+                <span className="flex-1 px-4 py-0 whitespace-pre text-gray-800 dark:text-gray-200">{line}</span>
+              </div>
+            ))
+          )}
         </code>
       </pre>
     </div>
   )
+}
+
+/** Split pre-highlighted HTML by newlines, preserving open span tags across lines. */
+function getHighlightedLine(html, lineIndex) {
+  const lines = html.split('\n')
+  return lines[lineIndex] ?? ''
+}
+
+/** Map file extension to hljs language name. */
+function extToLang(path) {
+  if (!path) return null
+  const ext = path.split('.').pop()?.toLowerCase()
+  const map = {
+    py: 'python', js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+    sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml',
+    json: 'json', md: 'markdown', html: 'xml', xml: 'xml', css: 'css', scss: 'scss',
+    sql: 'sql', go: 'go', rs: 'rust', java: 'java', kt: 'kotlin', rb: 'ruby',
+    php: 'php', swift: 'swift', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+    r: 'r', R: 'r', lua: 'lua', pl: 'perl', ex: 'elixir', exs: 'elixir',
+    dart: 'dart', toml: 'ini', ini: 'ini', cfg: 'ini', tf: 'hcl',
+    Makefile: 'makefile', Dockerfile: 'dockerfile', vue: 'xml', svelte: 'xml',
+  }
+  return map[ext] || null
 }
 
 function formatSize(bytes) {

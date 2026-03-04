@@ -150,19 +150,11 @@ REQUIRED_ARM_FOLDERS = {"code", "report", "dataset", "trace"}
 
 
 def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
-    """Download arm.zip from OSS, validate 4-folder structure, extract all modules.
+    """Download arm.zip from OSS, extract all contents, auto-detect structure.
 
-    Expected structure:
-        Code/       (must contain README.md)
-        Report/     (must contain exactly one .md file)
-        Dataset/    (can be empty)
-        Trace/      (can be empty)
-
-    Extracts:
-        Code/  -> {storage_prefix}/code/extracted/ + manifest.json
-        Report/ .md -> {storage_prefix}/report/report.md
-        Dataset/ -> {storage_prefix}/dataset/
-        Trace/  -> {storage_prefix}/trace/
+    Supports any zip structure — no required folders. Extracts everything to
+    code/extracted/ and generates a manifest. Looks for markdown files to use
+    as report (README.md, REPORT.md, RESULT.md etc).
 
     Returns dict with manifest and all module OSS keys.
     Raises ValueError on validation failure.
@@ -173,12 +165,7 @@ def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
     zip_bytes = bucket.get_object(arm_zip_key).read()
 
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        # ── Pass 1: validate structure ──────────────────────────
-        top_folders = set()
-        # Map normalized folder name -> actual prefix used in zip
-        folder_prefix_map = {}
-        code_has_readme = False
-        report_md_files = []
+        # ── Pass 1: scan structure ──────────────────────────
         total_size = 0
         file_count = 0
 
@@ -186,24 +173,8 @@ def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
             # Security: ZipSlip prevention
             if ".." in info.filename or info.filename.startswith("/"):
                 raise ValueError(f"Unsafe path in zip: {info.filename}")
-            # Skip symlinks
             if info.external_attr >> 16 & 0o120000 == 0o120000:
                 continue
-
-            # Determine top-level folder
-            parts = info.filename.split("/")
-            if len(parts) < 2 or not parts[0]:
-                # Files at root level (not inside any folder) — skip dirs like ""
-                if not info.is_dir():
-                    raise ValueError(f"File at root level not allowed: {info.filename}. All files must be inside Code/, Report/, Dataset/, or Trace/.")
-                continue
-
-            top_raw = parts[0]
-            top_norm = top_raw.lower()
-            top_folders.add(top_norm)
-            if top_norm not in folder_prefix_map:
-                folder_prefix_map[top_norm] = top_raw
-
             if info.is_dir():
                 continue
 
@@ -214,38 +185,36 @@ def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
             if total_size > MAX_EXTRACT_TOTAL_SIZE:
                 raise ValueError(f"Zip total size exceeds limit ({MAX_EXTRACT_TOTAL_SIZE // 1024 // 1024}MB)")
 
-            # Check Code/README.md (case-insensitive)
-            if top_norm == "code":
-                basename = parts[-1].lower()
-                if basename == "readme.md" and len(parts) == 2:
-                    code_has_readme = True
+        # Detect if zip has a common top-level prefix (single root folder)
+        all_names = [n for n in zf.namelist() if not n.endswith("/")]
+        common_prefix = ""
+        if all_names:
+            first_parts = all_names[0].split("/")
+            if len(first_parts) > 1:
+                candidate = first_parts[0] + "/"
+                if all(n.startswith(candidate) for n in all_names):
+                    common_prefix = candidate
 
-            # Collect Report/*.md files (top-level of Report/ only)
-            if top_norm == "report" and len(parts) == 2:
-                if parts[-1].lower().endswith(".md"):
-                    report_md_files.append(info.filename)
+        # Check for legacy 4-folder structure (Code/Report/Dataset/Trace)
+        top_folders = set()
+        for name in all_names:
+            stripped = name[len(common_prefix):] if common_prefix else name
+            parts = stripped.split("/")
+            if len(parts) >= 2 and parts[0]:
+                top_folders.add(parts[0].lower())
 
-        # Validate: exactly the 4 required folders, no extras
-        extra_folders = top_folders - REQUIRED_ARM_FOLDERS
-        if extra_folders:
-            raise ValueError(f"Unexpected top-level folders: {', '.join(sorted(extra_folders))}. Only Code/, Report/, Dataset/, Trace/ are allowed.")
-        missing_folders = REQUIRED_ARM_FOLDERS - top_folders
-        if missing_folders:
-            raise ValueError(f"Missing required top-level folders: {', '.join(sorted(missing_folders))}")
-
-        if not code_has_readme:
-            raise ValueError("Code/ folder must contain README.md at the top level")
-
-        if len(report_md_files) != 1:
-            raise ValueError(f"Report/ folder must contain exactly one .md file, found {len(report_md_files)}")
+        is_legacy = top_folders >= {"code", "report"}
 
         # ── Pass 2: extract files ──────────────────────────────
         code_files_list = []
         code_total_size = 0
         code_file_count = 0
         report_md_key = None
+        report_md_candidates = []
         code_zip_buffer = io.BytesIO()
         code_zip_out = zipfile.ZipFile(code_zip_buffer, "w", zipfile.ZIP_DEFLATED)
+        trace_zip_buffer = io.BytesIO()
+        trace_zip_out = zipfile.ZipFile(trace_zip_buffer, "w", zipfile.ZIP_DEFLATED)
 
         for info in zf.infolist():
             if info.is_dir():
@@ -255,73 +224,92 @@ def extract_arm_zip(arm_zip_key: str, storage_prefix: str) -> dict:
             if info.external_attr >> 16 & 0o120000 == 0o120000:
                 continue
 
-            parts = info.filename.split("/")
-            if len(parts) < 2 or not parts[0]:
-                continue
-
-            top_norm = parts[0].lower()
-            # Relative path inside the folder (e.g. "src/main.py")
-            rel_path = "/".join(parts[1:])
+            raw_path = info.filename
+            # Strip common prefix
+            rel_path = raw_path[len(common_prefix):] if common_prefix else raw_path
             if not rel_path:
                 continue
 
             data = zf.read(info.filename)
 
-            if top_norm == "code":
-                # Extract to code/extracted/
+            if is_legacy:
+                # Legacy mode: split by top-level folder
+                parts = rel_path.split("/")
+                if len(parts) < 2 or not parts[0]:
+                    continue
+                top_norm = parts[0].lower()
+                inner_path = "/".join(parts[1:])
+                if not inner_path:
+                    continue
+
+                if top_norm == "code":
+                    extracted_key = f"{storage_prefix}/code/extracted/{inner_path}"
+                    bucket.put_object(extracted_key, data)
+                    code_zip_out.writestr(inner_path, data)
+                    code_file_count += 1
+                    code_total_size += info.file_size
+                    ext = ("." + inner_path.rsplit(".", 1)[-1]).lower() if "." in inner_path else ""
+                    code_files_list.append({
+                        "path": inner_path,
+                        "size": info.file_size,
+                        "is_text": ext in TEXT_EXTENSIONS,
+                        "lang": LANG_MAP.get(ext, None),
+                    })
+                elif top_norm == "report":
+                    if inner_path.lower().endswith(".md"):
+                        report_md_key = f"{storage_prefix}/report/report.md"
+                        bucket.put_object(report_md_key, data)
+                elif top_norm == "trace":
+                    trace_key = f"{storage_prefix}/trace/{inner_path}"
+                    bucket.put_object(trace_key, data)
+                    trace_zip_out.writestr(inner_path, data)
+                elif top_norm == "dataset":
+                    dataset_key = f"{storage_prefix}/dataset/{inner_path}"
+                    bucket.put_object(dataset_key, data)
+            else:
+                # Flat mode: treat entire zip as code, auto-detect report md
                 extracted_key = f"{storage_prefix}/code/extracted/{rel_path}"
                 bucket.put_object(extracted_key, data)
-
-                # Also add to code.zip we're re-creating
                 code_zip_out.writestr(rel_path, data)
-
                 code_file_count += 1
                 code_total_size += info.file_size
-
                 ext = ("." + rel_path.rsplit(".", 1)[-1]).lower() if "." in rel_path else ""
-                is_text = ext in TEXT_EXTENSIONS
-                lang = LANG_MAP.get(ext, None)
                 code_files_list.append({
                     "path": rel_path,
                     "size": info.file_size,
-                    "is_text": is_text,
-                    "lang": lang,
+                    "is_text": ext in TEXT_EXTENSIONS,
+                    "lang": LANG_MAP.get(ext, None),
                 })
 
-            elif top_norm == "report":
-                # Upload the single .md as report.md
-                report_md_key = f"{storage_prefix}/report/report.md"
-                bucket.put_object(report_md_key, data)
+                # Collect top-level .md files as report candidates
+                basename = rel_path.split("/")[-1].lower()
+                depth = len(rel_path.split("/"))
+                if depth == 1 and basename.endswith(".md"):
+                    report_md_candidates.append((basename, rel_path, data))
 
-            elif top_norm == "dataset":
-                dataset_key = f"{storage_prefix}/dataset/{rel_path}"
-                bucket.put_object(dataset_key, data)
-
-            elif top_norm == "trace":
-                trace_key = f"{storage_prefix}/trace/{rel_path}"
-                bucket.put_object(trace_key, data)
-
-        # Finalize and upload code.zip
+        # Finalize code.zip
         code_zip_out.close()
         code_zip_key = f"{storage_prefix}/code/code.zip"
         bucket.put_object(code_zip_key, code_zip_buffer.getvalue())
 
-        # Upload trace.zip (re-package trace folder contents)
-        trace_zip_buffer = io.BytesIO()
-        trace_zip_out = zipfile.ZipFile(trace_zip_buffer, "w", zipfile.ZIP_DEFLATED)
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            parts = info.filename.split("/")
-            if len(parts) < 2 or not parts[0]:
-                continue
-            if parts[0].lower() == "trace":
-                rel_path = "/".join(parts[1:])
-                if rel_path:
-                    trace_zip_out.writestr(rel_path, zf.read(info.filename))
+        # Finalize trace.zip
         trace_zip_out.close()
         trace_zip_key = f"{storage_prefix}/trace/trace.zip"
         bucket.put_object(trace_zip_key, trace_zip_buffer.getvalue())
+
+        # Auto-detect report md from flat zip (priority order)
+        if not report_md_key and report_md_candidates:
+            priority = ["readme.md", "report.md", "result.md"]
+            for pname in priority:
+                match = [c for c in report_md_candidates if c[0] == pname]
+                if match:
+                    report_md_key = f"{storage_prefix}/report/report.md"
+                    bucket.put_object(report_md_key, match[0][2])
+                    break
+            if not report_md_key:
+                # Use first .md found
+                report_md_key = f"{storage_prefix}/report/report.md"
+                bucket.put_object(report_md_key, report_md_candidates[0][2])
 
     # Build code manifest
     manifest = {

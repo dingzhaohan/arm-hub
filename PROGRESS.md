@@ -1,6 +1,6 @@
 # ARM Hub 开发进度
 
-> 最后更新: 2026-03-03
+> 最后更新: 2026-03-04
 
 ---
 
@@ -44,18 +44,32 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
 
 - ARM Series (一篇论文可有多个复现系列)
 - ARM Version (每个系列可有多版本, 状态: draft → uploading → processing → ready/failed)
-- **单 zip 上传流程**: 用户上传 arm.zip, 后端自动解压校验
-  - arm.zip 必须包含 4 个顶级文件夹: `Code/`, `Report/`, `Dataset/`, `Trace/`
-  - `Code/` 必须包含 `README.md`
-  - `Report/` 必须包含且仅包含一个 `.md` 文件
-  - 解压后自动生成 `code.zip`, `trace.zip`, `manifest.json`, `report.md`
+- **单 zip 上传流程**: 用户上传 arm.zip, 后端自动解压
+  - 支持任意 zip 结构, 不强制要求特定文件夹
+  - **自动检测 legacy 结构**: 如果 zip 包含 `Code/`, `Report/` 顶级文件夹, 按传统模式分模块解压
+  - **自动检测 flat 结构**: 否则将全部内容视为代码, 解压到 `code/extracted/`
+  - **自动检测 common prefix**: 如果所有文件共享一个顶级目录 (如 `project-name/`), 自动去掉前缀
+  - 自动查找 markdown 报告 (优先级: README.md > REPORT.md > RESULT.md > 第一个 .md 文件)
+  - 解压后自动生成 `code.zip`, `trace.zip`, `manifest.json`
 - 上传向导简化为 4 步: 选论文 → 创建系列 → 上传 arm.zip → 提交
 
 ### 5. 代码浏览
 
-- GitHub 风格: 目录树 + 文件内容预览
-- 语法高亮 (rehype-highlight)
-- README.md 自动渲染
+- **ARM CodeBrowser**: GitHub 风格文件树 + 文件内容预览
+  - 左侧目录树 (基于 manifest.json), 右侧文件预览
+  - 语法高亮 (highlight.js, 支持 30+ 语言)
+  - Markdown 文件自动渲染 (react-markdown + remark-gfm + rehype-highlight)
+  - **PDF 内嵌预览**: 检测 PDF 文件 (mime_type 或 .pdf 扩展名), 通过 OSS 签名 URL 用 iframe 展示
+  - 根目录自动加载优先级: README.md > REPORT.md > RESULT.md
+  - 面包屑导航, 支持逐级点击跳转
+  - Download ZIP 按钮 (下载整个代码包)
+  - 单文件下载按钮
+  - **全屏展示**: ARM 版本详情页去掉 Code/Report/Trace/Datasets/Score tab, 直接全屏展示文件树
+- **Skill FileBrowser**: 与 ARM CodeBrowser 功能对齐
+  - 后端从 OSS zip 实时解压, 返回目录列表或文件内容
+  - 语法高亮 + Markdown 渲染 + PDF iframe 预览
+  - 根目录自动加载: SKILL.md > README.md
+  - 二进制文件提供下载链接 (通过 OSS 签名 URL)
 
 ### 6. BohrClaw (Agent Playground)
 
@@ -78,6 +92,13 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
 ### 7. 其他功能
 
 - Dataset / Skill CRUD + 上传下载
+- **Skill 创建流程**: 前端 JSZip 客户端打包 + STS 上传
+  - 支持选择文件或整个文件夹 (Files/Folder 切换)
+  - 无格式验证, 任何文件均可上传
+  - 自动检测 `.md` 文件作为 README
+  - 前端 JSZip 打包为 zip, 再通过 STS 上传 OSS
+  - 进度条 (Creating → Credentials → Packaging → Uploading → Completing)
+  - `oss_zip_key` 和 `oss_md_key` 均为可选, 支持只上传 markdown 不传 zip
 - 用户关注 (Paper / Dataset / Skill)
 - 个人中心 (我的 ARM / 我的数据集 / 我的技能 / 关注列表)
 - ARM 评分接口 (预留, 支持回调)
@@ -192,6 +213,65 @@ Skill:   skills/{skill_id}/users/{uid}/skill.zip
   - 后端 `GET /api/papers` 已支持 `limit`/`offset`, 返回 `total`, 前端原来没用
 - **品牌统一**: 所有 "OpenClaw" 展示文本改为 "BohrClaw", 路由 `/playground` → `/bohrclaw`
 
+### v0.8 — Skill 上传重构 + 文件浏览器增强 + ARM 放宽校验
+
+#### Skill 创建流程完善
+- **前端 `Skills.jsx`**: `CreateSkillForm` 从只填元数据 → 完整的上传流程
+  - Files/Folder 切换: 选文件用 `<input type="file" multiple>`, 选文件夹用 `<input webkitdirectory>`
+  - 客户端 JSZip 打包 → STS 上传 → complete
+  - 自动检测 .md 文件上传为 README
+  - 去掉 markdown 粘贴功能, 保持简洁
+- **后端 `skills.py`**: `complete` 接口 `oss_zip_key` 改为 `Optional`, 允许纯文档型 skill
+
+#### Skill 文件浏览器 (新增)
+- **后端 `skills.py`**: 新增 `GET /api/skills/{id}/files` — 从 OSS 下载 zip, 用 `zipfile` 实时解压, 返回目录列表或文件内容
+  - 文本文件返回内容 (≤1MB), 二进制文件返回 `[Binary file]` + `download_url` (OSS 签名 URL)
+  - 新增 `GET /api/skills/{id}/download-readme` 端点
+- **前端 `SkillDetail.jsx`**: 新增 `SkillFileBrowser` + `SkillFileContent` + `HighlightedCode` 组件
+  - 目录树 + 文件预览, 与 ARM CodeBrowser 风格一致
+  - highlight.js 语法高亮 (30+ 语言映射)
+  - Markdown 渲染 (react-markdown + remark-gfm)
+  - PDF iframe 内嵌预览
+  - 根目录自动加载: SKILL.md > README.md
+  - Download 按钮只在有 `oss_zip_key` 时显示
+- **前端 `api.js`**: 新增 `getSkillFiles()`, `downloadSkillReadme()`
+
+#### ARM 上传校验放宽
+- **后端 `oss_service.py`**: `extract_arm_zip()` 重写
+  - 移除强制 4 文件夹 (Code/Report/Dataset/Trace) 校验
+  - 自动检测 legacy 结构 (含 code/ + report/) vs flat 结构
+  - 自动检测 common prefix (单根目录 zip 自动去前缀)
+  - flat 模式: 全部内容视为代码, 自动找 md 作为报告
+  - 报告 md 优先级: readme.md > report.md > result.md > 第一个 .md
+- **前端 `ArmUploadWizard.jsx`**: 移除 4 文件夹结构说明, 改为 "Any structure is accepted"
+
+#### CodeBrowser 增强
+- **前端 `CodeBrowser.jsx`**:
+  - 新增 highlight.js 语法高亮 (原来是纯文本)
+  - 根目录自动加载优先级: README.md > REPORT.md > RESULT.md
+  - 新增 PDF iframe 内嵌预览 (检测 mime_type 或 .pdf 扩展名)
+
+#### ARM 详情页简化
+- **前端 `ArmVersionDetail.jsx`**: 移除所有 tab (Code/Report/Trace/Datasets/Score)
+  - 删除 activeTab 状态, reportContent/traceInfo/score 等加载逻辑
+  - 删除 ReportTab/TraceTab/DatasetsTab/ScoreTab 组件
+  - 直接全屏展示 `<CodeBrowser armVersionId={id} />`
+  - 保留: 头部信息 (版本号/状态/分数/链接), 论文卡片, 关联 dataset/skill 标签
+
+#### 涉及文件 (10 个)
+| 文件 | 改动 |
+|------|------|
+| `backend/routes/skills.py` | +135 行: complete 放宽, 新增 files/download-readme 端点, 二进制文件返回 download_url |
+| `backend/oss_service.py` | 重写 extract_arm_zip: 移除强制校验, 自动检测结构 |
+| `frontend/src/pages/Skills.jsx` | +85 行: CreateSkillForm 加文件选择/JSZip 打包/上传进度 |
+| `frontend/src/pages/SkillDetail.jsx` | +272 行: SkillFileBrowser + SkillFileContent + HighlightedCode + PDF 预览 |
+| `frontend/src/components/CodeBrowser.jsx` | +60 行: hljs 语法高亮, 自动加载优先级, PDF iframe 预览 |
+| `frontend/src/pages/ArmVersionDetail.jsx` | -200 行: 删除所有 tab, 全屏文件树 |
+| `frontend/src/pages/ArmUploadWizard.jsx` | -12 行: 移除结构说明 |
+| `frontend/src/api.js` | +2 行: getSkillFiles, downloadSkillReadme |
+| `frontend/package.json` | +jszip 依赖 |
+| `frontend/package-lock.json` | 自动更新 |
+
 ---
 
 ## 五、环境配置
@@ -266,3 +346,23 @@ VITE_BOHRIUM_ENV=dev   # dev 对应 test.bohrium.com
 - 后端如果已支持 `limit`/`offset` 分页, 前端一定要用上, 不要无参全量加载
 - 分页 UI: `page` state (0-based), `offset = page * PAGE_SIZE`, `total > PAGE_SIZE` 时显示
 - 搜索后要 `setPage(0)` 重置页码, 否则可能看到空页
+
+### 文件浏览器
+- **highlight.js vs rehype-highlight**: CodeBrowser 中用 `hljs.highlight()` 手动高亮可以按行分割并添加行号; `rehype-highlight` 只适合 Markdown 中的代码块
+- **PDF 预览**: 最简单的方式是用 `<iframe src={signedUrl}>`, 浏览器内置 PDF 渲染器就能工作, 不需要额外依赖
+- **二进制文件预览**: 后端需要为二进制文件生成 OSS 签名 URL 返回给前端, 前端才能用 iframe/img/download
+- **Skill zip 实时解压**: 从 OSS 下载整个 zip 到内存再用 `zipfile` 解析, 适合小文件 (<50MB); 大文件应该预先解压存储 (ARM 模式)
+- **自动加载优先级**: 多个候选文件时用 priority 数组遍历查找, 代码简洁; Skill 和 ARM 的优先级不同 (SKILL.md > README.md vs README.md > REPORT.md > RESULT.md)
+
+### ARM zip 结构检测
+- **不要强制校验 zip 结构** — 用户可能上传各种格式的 zip, 服务端应该尽力解析而非报错拒绝
+- **legacy 检测**: 通过 `top_folders >= {"code", "report"}` 判断是否是传统 4 文件夹结构, 是则分模块解压, 否则 flat 解压
+- **common prefix 检测**: 很多压缩工具会把所有文件放在一个同名根目录下, 需要检测并去掉这个前缀
+- **report md 自动发现**: 优先级匹配比严格校验更友好, 找不到精确匹配就降级用第一个 .md
+
+### JSZip 客户端打包
+- 浏览器端用 `jszip` 打包文件夹为 zip, 避免要求用户自己压缩
+- `file.webkitRelativePath` 包含相对路径 (如 `mydir/sub/file.txt`), 可保留目录结构
+- `zip.generateAsync({ type: 'blob' })` 生成 Blob, 再 `new File([blob], 'name.zip')` 转为 File 对象传给 ossUpload
+- `<input webkitdirectory>` 可以选整个文件夹, 但注意这是非标准属性 (Chrome/Edge/Firefox 支持, Safari 部分支持)
+- 动态 import `jszip` (`await import('jszip')`) 避免首屏加载过大
