@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api } from '../api'
 import { useAuth } from '../contexts/AuthContext'
 import { ossUpload, validateFile } from '../utils/ossUpload'
@@ -208,7 +209,7 @@ export default function PaperDetail() {
             )}
             {diagOpen && (
               <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 prose prose-sm dark:prose-invert max-w-none">
-                <ReactMarkdown>{diagContent}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{diagContent}</ReactMarkdown>
               </div>
             )}
           </>
