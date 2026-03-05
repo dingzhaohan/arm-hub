@@ -202,14 +202,22 @@ export default function BohrClaw() {
         </div>
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-4">
           <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
-            {instance.error_message || 'Provisioning failed'}
+            <p className="font-medium mb-1">Provisioning failed</p>
+            <p>{instance.error_message || 'Unknown error'}</p>
           </div>
           <button
             onClick={handleLaunch}
             disabled={launching}
             className="w-full px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
           >
-            Retry
+            {launching ? 'Starting...' : 'Retry'}
+          </button>
+          <button
+            onClick={handleDestroy}
+            disabled={destroying}
+            className="w-full px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
+          >
+            {destroying ? 'Cleaning up...' : 'Clear failed instance'}
           </button>
         </div>
       </div>

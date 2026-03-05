@@ -151,7 +151,40 @@ def verify_bohrium_token_raw(token: str) -> dict:
     return data
 
 
+def _create_user_access_key(bohrium_user_id: int, bohrium_org_id: int) -> str:
+    """Create a new Bohrium access key for a user who doesn't have one yet."""
+    url = f"{BOHRIUM_CORE_API}/api/v1/ak/create"
+    data = json.dumps({"name": "arm-hub-auto"}).encode()
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("X-User-Id", str(bohrium_user_id))
+    req.add_header("X-Org-Id", str(bohrium_org_id))
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode() if hasattr(e, "read") else ""
+        logger.error("AK create HTTP %s for userId=%s: %s", e.code, bohrium_user_id, err_body)
+        raise RuntimeError(f"Failed to create Bohrium access key (HTTP {e.code})")
+    except Exception as e:
+        logger.error("AK create failed for userId=%s: %s", bohrium_user_id, e)
+        raise RuntimeError(f"Failed to create Bohrium access key: {e}")
+
+    if body.get("code") != 0:
+        msg = body.get("message", "unknown error")
+        raise RuntimeError(f"Bohrium AK creation failed: {msg}")
+
+    ak_data = body.get("data") or {}
+    access_key = ak_data.get("accessKey")
+    if not access_key:
+        raise RuntimeError("Bohrium AK creation returned empty access key")
+
+    logger.info("Auto-created AK for userId=%s", bohrium_user_id)
+    return access_key
+
+
 def get_user_access_key(bohrium_user_id: int, bohrium_org_id: int) -> str:
+    """Fetch a user's Bohrium access key, auto-creating one if none exists."""
     url = f"{BOHRIUM_CORE_API}/api/v1/ak/list"
     req = urllib.request.Request(url, method="GET")
     req.add_header("X-User-Id", str(bohrium_user_id))
@@ -159,16 +192,21 @@ def get_user_access_key(bohrium_user_id: int, bohrium_org_id: int) -> str:
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        logger.error("AK list HTTP %s for userId=%s", e.code, bohrium_user_id)
+        raise RuntimeError(f"Failed to fetch Bohrium access key (HTTP {e.code})")
     except Exception as e:
         logger.error("Failed to fetch AK for userId=%s: %s", bohrium_user_id, e)
-        raise HTTPException(status_code=502, detail="Failed to fetch Bohrium access key")
+        raise RuntimeError(f"Failed to reach Bohrium API: {e}")
 
     if body.get("code") != 0:
-        raise HTTPException(status_code=502, detail="Bohrium AK API returned an error")
+        raise RuntimeError("Bohrium AK API returned an error")
 
     ak_list = body.get("data") or []
     if not ak_list:
-        raise HTTPException(status_code=404, detail="No Bohrium access key found for this user")
+        # Auto-create AK for new users
+        logger.info("No AK found for userId=%s, auto-creating...", bohrium_user_id)
+        return _create_user_access_key(bohrium_user_id, bohrium_org_id)
 
     return ak_list[0]["accessKey"]
 

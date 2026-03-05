@@ -76,12 +76,24 @@ def _provision_background(instance_id: int, email: str, bohrium_user_id: int, bo
         )
 
     except Exception as e:
-        logger.error("BohrClaw provisioning failed for instance %s: %s", instance_id, e)
+        logger.error("BohrClaw provisioning failed for instance %s: %s", instance_id, e, exc_info=True)
+        # Provide user-friendly error messages
+        err = str(e)
+        if "access key" in err.lower() or "ak" in err.lower():
+            user_msg = f"Access key error: {err}. Please try again or contact support."
+        elif "No Bohrium projects" in err:
+            user_msg = "No Bohrium project found. Please create a project on Bohrium first."
+        elif "HTTP 401" in err or "HTTP 403" in err:
+            user_msg = "Authentication failed. Please re-login and try again."
+        elif "not ready within" in err.lower() or "timeout" in err.lower():
+            user_msg = "Service startup timed out. Please retry — this is usually temporary."
+        else:
+            user_msg = err
         _update_instance(
             instance_id,
             status="failed",
             progress_step=None,
-            error_message=str(e),
+            error_message=user_msg,
         )
 
 
